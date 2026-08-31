@@ -249,7 +249,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupAt: null,
   lastSaveAt: null,
   autoCheckUpdates: true,
-  githubRepo: "username/mtrii-notes",
+  githubRepo: "s7jvgkyp54-create/mtrii-notes",
   lastUpdateCheckAt: null,
   openTabIds: [],
   pageMode: "continuous",
