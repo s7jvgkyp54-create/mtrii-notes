@@ -1,14 +1,8 @@
 import { useEffect, useState } from "react";
-import { GOOGLE_CLIENT_ID, GOOGLE_API_KEY } from "@/lib/notes/types";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
-
-declare global {
-  interface Window {
-    gapi: any;
-    google: any;
-  }
-}
+import { Loader2, FileText, Cloud } from "lucide-react";
+import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export function DrivePicker({
   open,
@@ -21,81 +15,81 @@ export function DrivePicker({
   onClose: () => void;
   onPick: (file: { id: string; name: string; mimeType: string }) => void;
 }) {
-  const [pickerInited, setPickerInited] = useState(false);
+  const [files, setFiles] = useState<{id: string, name: string, mimeType: string}[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !accessToken) return;
+    let mounted = true;
     
-    if (GOOGLE_CLIENT_ID === "YOUR_CLIENT_ID_HERE" || GOOGLE_API_KEY === "YOUR_API_KEY_HERE") {
-      toast.error("Vui lòng cấu hình API Key và Client ID trong mã nguồn!");
-      onClose();
-      return;
-    }
-
-    const scriptId = "google-picker-script";
-    
-    const createPicker = () => {
-      const google = window.google;
-      if (!google || !google.picker) return;
-
-      const view = new google.picker.DocsView(google.picker.ViewId.DOCS);
-      view.setIncludeFolders(true);
-      view.setMimeTypes("application/pdf,image/png,image/jpeg,image/webp");
-
-      const picker = new google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(accessToken)
-        .setDeveloperKey(GOOGLE_API_KEY)
-        .setCallback((data: any) => {
-          if (data.action === google.picker.Action.PICKED) {
-            const doc = data.docs[0];
-            onPick({
-              id: doc.id,
-              name: doc.name,
-              mimeType: doc.mimeType,
-            });
-          } else if (data.action === google.picker.Action.CANCEL) {
-            onClose();
+    async function loadFiles() {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          "https://www.googleapis.com/drive/v3/files?q=mimeType='application/pdf' and trashed=false&fields=files(id,name,mimeType)&orderBy=modifiedTime desc&pageSize=100",
+          {
+            headers: { Authorization: `Bearer ${accessToken}` }
           }
-        })
-        .build();
-
-      picker.setVisible(true);
-      // Hack to fix picker z-index over Tauri
-      setTimeout(() => {
-        const dialogs = document.querySelectorAll('.picker-dialog');
-        dialogs.forEach((d: any) => d.style.zIndex = '9999');
-        const bgs = document.querySelectorAll('.picker-dialog-bg');
-        bgs.forEach((b: any) => b.style.zIndex = '9998');
-      }, 100);
-    };
-
-    if (window.gapi && window.google?.picker) {
-      createPicker();
-    } else {
-      if (!document.getElementById(scriptId)) {
-        const script = document.createElement("script");
-        script.id = scriptId;
-        script.src = "https://apis.google.com/js/api.js";
-        script.onload = () => {
-          window.gapi.load('picker', { callback: createPicker });
-        };
-        document.body.appendChild(script);
-      } else {
-        window.gapi.load('picker', { callback: createPicker });
+        );
+        if (!res.ok) throw new Error("Không thể lấy danh sách file");
+        const data = await res.json();
+        if (mounted) {
+          setFiles(data.files || []);
+        }
+      } catch (err: any) {
+        if (mounted) toast.error(err.message);
+      } finally {
+        if (mounted) setLoading(false);
       }
     }
+    
+    loadFiles();
+    
+    return () => { mounted = false; };
   }, [open, accessToken]);
 
   if (!open) return null;
 
+  if (!accessToken) {
+    return (
+      <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="Chưa kết nối">
+        <div className="py-6 text-center">
+          <p className="text-sm font-medium text-danger">Chưa kết nối Google Drive</p>
+          <p className="text-sm text-muted mt-2">Vui lòng vào phần Cài đặt để đăng nhập trước.</p>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={onClose}>Đóng</Button>
+        </div>
+      </Dialog>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm">
-      <div className="flex flex-col items-center gap-4 rounded-xl bg-surface p-6 shadow-xl">
-        <Loader2 className="size-8 animate-spin text-accent" />
-        <p className="text-sm font-medium">Đang mở Google Picker...</p>
-        <button onClick={onClose} className="mt-2 text-xs text-muted hover:underline">Hủy</button>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="Chọn PDF từ Google Drive" className="w-[min(90vw,600px)]">
+      <div className="flex-1 overflow-y-auto min-h-[300px] max-h-[60vh] border rounded-md mt-4 p-2 bg-surface">
+        {loading ? (
+          <div className="flex h-full min-h-[280px] items-center justify-center">
+            <Loader2 className="size-6 animate-spin text-accent" />
+          </div>
+        ) : files.length === 0 ? (
+          <div className="flex h-full min-h-[280px] items-center justify-center text-sm text-muted">
+            Không tìm thấy file PDF nào trong Drive của bạn.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-1">
+            {files.map(f => (
+              <button
+                key={f.id}
+                onClick={() => onPick(f)}
+                className="flex items-center gap-3 w-full p-3 rounded hover:bg-overlay text-left transition-colors"
+              >
+                <FileText className="size-8 text-danger shrink-0" />
+                <span className="truncate text-sm font-medium flex-1">{f.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </Dialog>
   );
 }
