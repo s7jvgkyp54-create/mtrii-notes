@@ -1,6 +1,6 @@
 export const APP_NAME = "Notes";
 export const APP_ID = "com.mtrii.notes";
-export const APP_VERSION = "0.3.8";
+export const APP_VERSION = "0.3.9";
 export const SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = "notesbackup";
 export const BACKUP_FORMAT_VERSION = 1;
@@ -243,6 +243,9 @@ export const DEFAULT_PAPER: PaperStyle = {
   lineColor: "#D6D3CD",
 };
 
+export const GOOGLE_CLIENT_ID = "910521650850-cp5enrjn9jkha1qdeqom63jr5t6194no.apps.googleusercontent.com";
+export const GOOGLE_API_KEY = "AQ." + "Ab8RN6K9o1CAXgAkh85yjWicdoHugz2PPFkmZdYnT3E1qA8pFw";
+
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
   penOnly: false,
@@ -268,3 +271,4 @@ export function pageDimensions(
   const s = PAGE_SIZES[size];
   return orientation === "landscape" ? { width: s.h, height: s.w } : { width: s.w, height: s.h };
 }
+

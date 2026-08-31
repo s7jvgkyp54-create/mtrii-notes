@@ -7,7 +7,7 @@ async fn start_google_oauth(client_id: String, client_secret: String) -> Result<
     let (redirect_uri, rx) = oauth::start_local_server()?;
     
     let auth_url = format!(
-        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive.readonly",
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive.file",
         client_id, urlencoding::encode(&redirect_uri)
     );
     
@@ -932,5 +932,6 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("Không thể khởi động Notes");
 }
+
 
 
