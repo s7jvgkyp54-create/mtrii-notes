@@ -273,3 +273,19 @@ export function pageDimensions(
   return orientation === "landscape" ? { width: s.h, height: s.w } : { width: s.w, height: s.h };
 }
 
+
+export interface Tombstone {
+  id: string;
+  type: "folder" | "notebook" | "page" | "pageObjects" | "bookmark";
+  deletedAt: number;
+}
+
+export interface BackupManifest {
+  backupId: string;
+  parentBackupId: string | null;
+  type: "full" | "incremental";
+  timestamp: number;
+  appVersion: string;
+  dbVersion: number;
+  encrypted: boolean;
+}

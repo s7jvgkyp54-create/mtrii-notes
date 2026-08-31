@@ -7,10 +7,11 @@ import type {
   Folder,
   Notebook,
   PageRecord,
+  Tombstone
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
-type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks";
+type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups";
 
 type AssetPayload = {
   meta: Omit<AssetRecord, "blob">;
@@ -95,15 +96,15 @@ export async function loadLibrary() {
 }
 
 export const putFolder = (folder: Folder) => put("folders", folder.id, folder);
-export const delFolder = (id: string) => remove("folders", id);
+export const delFolder = async (id: string) => { await remove("folders", id); await put("tombstones", id, { id, type: "folder", deletedAt: Date.now() }); };
 export const putNotebook = (notebook: Notebook) => put("notebooks", notebook.id, notebook);
-export const delNotebook = (id: string) => remove("notebooks", id);
+export const delNotebook = async (id: string) => { await remove("notebooks", id); await put("tombstones", id, { id, type: "notebook", deletedAt: Date.now() }); };
 export const putPage = (page: PageRecord) => put("pages", page.id, page);
-export const delPage = (id: string) => remove("pages", id);
+export const delPage = async (id: string) => { await remove("pages", id); await put("tombstones", id, { id, type: "page", deletedAt: Date.now() }); };
 export const putObjects = (pageId: string, objects: CanvasObject[]) =>
-  put("pageObjects", pageId, { pageId, objects });
+  put("pageObjects", pageId, { pageId, objects, updatedAt: Date.now() });
 export const putBookmark = (bookmark: Bookmark) => put("bookmarks", bookmark.id, bookmark);
-export const delBookmark = (id: string) => remove("bookmarks", id);
+export const delBookmark = async (id: string) => { await remove("bookmarks", id); await put("tombstones", id, { id, type: "bookmark", deletedAt: Date.now() }); };
 export const putSettings = (settings: AppSettings) => kvPut("settings", settings);
 export const putMeta = (meta: Record<string, unknown>) => kvPut("meta", meta);
 
@@ -224,4 +225,61 @@ export async function storageEstimate() {
 export async function openDataFolder() {
   await ready();
   await call("native_open_data_folder");
+}
+
+export const putBackupManifest = (manifest: import("./types").BackupManifest) => put("backups", manifest.backupId, manifest);
+export const getBackupManifests = () => all<import("./types").BackupManifest>("backups");
+export const getTombstones = () => all<import("./types").Tombstone>("tombstones");
+
+export async function dumpIncremental(lastBackupTime: number): Promise<DesktopDump & { tombstones: import("./types").Tombstone[] }> {
+    const full = await dumpAll();
+    const tombstones = await getTombstones();
+    
+    return {
+        ...full,
+        folders: full.folders.filter(f => f.updatedAt > lastBackupTime),
+        notebooks: full.notebooks.filter(n => n.updatedAt > lastBackupTime),
+        pages: full.pages.filter(p => p.updatedAt > lastBackupTime),
+        // Note: pageObjects has updatedAt injected by putObjects, but types.ts doesn't enforce it yet
+        pageObjects: full.pageObjects.filter(po => (po as any).updatedAt > lastBackupTime),
+        bookmarks: full.bookmarks.filter(b => (b as any).updatedAt > lastBackupTime),
+        tombstones: tombstones.filter(t => t.deletedAt > lastBackupTime)
+    };
+}
+
+export async function restoreBackupChain(targetBackupId: string) {
+    const all = await all<import("./types").BackupRecord>("backups");
+    const manifests = all.map(a => a as unknown as import("./types").BackupManifest);
+    
+    // Find target
+    const target = manifests.find(m => m.backupId === targetBackupId);
+    if (!target) throw new Error("Kh?ng t?m th?y b?n sao l?u " + targetBackupId);
+
+    // Build chain from target up to full
+    const chain: import("./types").BackupManifest[] = [];
+    let curr = target;
+    while (curr) {
+       chain.unshift(curr); // prepend so full is first
+       if (curr.type === "full") break;
+       if (!curr.parentBackupId) throw new Error("B?n t?ng d?n " + curr.backupId + " b? thi?u parentBackupId!");
+       const parent = manifests.find(m => m.backupId === curr.parentBackupId);
+       if (!parent) throw new Error("Chu?i sao l?u b? ??t ?o?n: thi?u " + curr.parentBackupId);
+       curr = parent;
+    }
+
+    if (chain[0].type !== "full") throw new Error("Chu?i sao l?u kh?ng b?t ??u b?ng b?n Full!");
+
+    const { inspectBackup } = await import("./io");
+    
+    for (let i = 0; i < chain.length; i++) {
+        const item = chain[i];
+        const record = all.find(a => a.id === item.backupId || (a as any).backupId === item.backupId);
+        if (!record || !record.blob) throw new Error("Thi?u d? li?u (blob) cho b?n sao l?u " + item.backupId);
+        
+        const preview = await inspectBackup(record.blob);
+        
+        // Full backup replaces everything. Incrementals merge.
+        const isFull = i === 0;
+        await importDump(preview.dump, isFull);
+    }
 }

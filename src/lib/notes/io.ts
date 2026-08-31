@@ -333,6 +333,7 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
     pageObjects: LibraryDump["pageObjects"];
     bookmarks: LibraryDump["bookmarks"];
     settings?: LibraryDump["settings"];
+    tombstones?: import("./types").Tombstone[];
   };
 
   const assets: AssetRecord[] = [];

@@ -149,11 +149,12 @@ interface NotesState {
   removeBookmark: (id: string) => Promise<void>;
 
   exportPdf: (notebookId: string) => Promise<void>;
-  exportBackup: (kind: "full" | "notebook", notebookId?: string) => Promise<void>;
+  exportBackup: (kind: "full" | "notebook" | "incremental", notebookId?: string) => Promise<void>;
   importBackupFile: (
     file: File,
     mode: "merge" | "replace",
   ) => Promise<{ names: string[]; warnings: string[] }>;
+  restoreStoredBackup: (backupId: string) => Promise<void>;
   previewBackup: (file: File) => Promise<BackupPreview>;
   runAutoBackup: () => Promise<void>;
   downloadStoredBackup: (id: string) => Promise<void>;
@@ -835,6 +836,18 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     return inspectBackup(file);
   },
 
+  restoreStoredBackup: async (backupId) => {
+    useNotesStore.setState({ isNavigating: true });
+    try {
+      const { restoreBackupChain } = await import("./desktop-db");
+      await restoreBackupChain(backupId);
+      // Wait for DB to settle and reload page
+      setTimeout(() => window.location.reload(), 500);
+    } catch (e) {
+      useNotesStore.setState({ isNavigating: false });
+      throw e;
+    }
+  },
   importBackupFile: async (file, mode) => {
     const { inspectBackup, remapBackupDump, buildBackupZip } = await import("./io");
     const preview = await inspectBackup(file);
@@ -881,7 +894,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const all = await db.listBackups();
       const autos = all.filter((b) => b.kind === "auto");
       const keep = s.backupKeep || 7;
-      for (const old of autos.slice(keep)) await db.delBackup(old.id);
+      // Only delete old chains safely. For now, to prevent breaking chains, we only delete if it's safe.
+        // A simple safe way: keep the latest "keep" full backups and all incrementals after the oldest kept full backup.
+        const fulls = autos.filter(a => {
+            const m = manifests.find(man => man.backupId === a.id || man.backupId === (a as any).backupId);
+            return m && m.type === "full";
+        });
+        if (fulls.length > keep) {
+            // Find the cutoff timestamp
+            const cutoff = fulls[keep - 1].createdAt;
+            for (const old of autos) {
+                if (old.createdAt < cutoff) await db.delBackup(old.id);
+            }
+        }
       const list = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
       set({ backups: list });
       get().persistSettings({ lastBackupAt: Date.now() });
