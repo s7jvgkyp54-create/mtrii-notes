@@ -746,7 +746,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       pages: payload.pages,
       objects: payload.objects,
     });
-    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
+    const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
     downloadBlob(blob, `${nb.name}.pdf`);
   },

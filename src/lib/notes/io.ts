@@ -11,9 +11,9 @@ import {
   type Notebook,
   type PageRecord,
 } from "./types";
-import { dumpAll, getAsset } from "./db";
+import { dumpAll, getAsset, objectUrlFor } from "./db";
 import { sha256Hex } from "@/lib/utils";
-import { strokeToSvgPath } from "./render";
+import { strokeToSvgPath, drawStroke, drawShape, drawText } from "./render";
 
 export const BACKUP_README = `Định dạng sao lưu Notes (.notesbackup)
 ====================================
@@ -64,8 +64,6 @@ async function rasterizeAnnotations(
     if (!ctx) return null;
     ctx.scale(scale, scale);
 
-    const { drawStroke, drawShape, drawText } = await import("./render");
-
     for (const o of objects) {
       if (o.type === "stroke") {
         drawStroke(ctx, o);
@@ -75,7 +73,6 @@ async function rasterizeAnnotations(
         drawText(ctx, o);
       } else if (o.type === "image") {
         try {
-          const { getAsset, objectUrlFor } = await import("./db");
           const asset = await getAsset(o.assetId);
           if (!asset) continue;
           const url = objectUrlFor(o.assetId, asset.blob);
