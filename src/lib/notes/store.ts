@@ -495,6 +495,13 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   destroyNotebook: async (id) => {
     const n = get().notebooks.find((x) => x.id === id);
     const payload = await db.loadNotebookPayload(id);
+    const assetIds = new Set<string>();
+    if (n?.pdfAssetId) assetIds.add(n.pdfAssetId);
+    for (const pageObjects of Object.values(payload.objects)) {
+      for (const object of pageObjects) {
+        if (object.type === "image") assetIds.add(object.assetId);
+      }
+    }
     set({
       notebooks: get().notebooks.filter((x) => x.id !== id),
       settings: {
@@ -505,10 +512,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     });
     await enqueue("destroy", async () => {
       for (const p of payload.pages) await db.delPage(p.id);
-      if (n?.pdfAssetId) {
-        const { evictPdf } = await import("./pdf");
-        evictPdf(n.pdfAssetId);
-        await db.delAsset(n.pdfAssetId);
+      for (const bookmark of payload.bookmarks) await db.delBookmark(bookmark.id);
+      for (const assetId of assetIds) {
+        if (n?.pdfAssetId === assetId) {
+          const { evictPdf } = await import("./pdf");
+          evictPdf(assetId);
+        }
+        db.revokeObjectUrl(assetId);
+        // On desktop this removes the corresponding file from NotesData/assets;
+        // in the browser it removes the IndexedDB blob and releases its quota.
+        await db.delAsset(assetId);
       }
       await db.delNotebook(id);
     });
