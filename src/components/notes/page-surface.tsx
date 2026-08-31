@@ -317,10 +317,15 @@ export function PageSurface({
     for (const o of objects) {
       if (o.type === "image") {
         try {
-          const asset = await getAsset(o.assetId);
-          if (asset) {
-            const img = await loadImage(o.assetId, objectUrlFor(o.assetId, asset.blob));
-            loadedImages.set(o.id, img);
+          const cached = imageCache.get(o.assetId);
+          if (cached) {
+            loadedImages.set(o.id, cached);
+          } else {
+            const asset = await getAsset(o.assetId);
+            if (asset) {
+              const img = await loadImage(o.assetId, objectUrlFor(o.assetId, asset.blob));
+              loadedImages.set(o.id, img);
+            }
           }
         } catch {}
       }
