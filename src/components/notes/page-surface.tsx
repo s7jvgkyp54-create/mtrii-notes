@@ -94,6 +94,7 @@ export function PageSurface({
   const renderIdRef = useRef(0);
   const drawing = useRef(false);
     const erasingNextRef = useRef<CanvasObject[] | null>(null);
+    const dragNextRef = useRef<CanvasObject[] | null>(null);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
   const strokeBeforeState = useRef<CanvasObject[] | null>(null);
