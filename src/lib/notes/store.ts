@@ -231,6 +231,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       }
       const again = await db.loadLibrary();
       const backups = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
+      const validTabs = Array.from(
+        new Set((again.settings.openTabIds || []).filter((t) => again.notebooks.some((n) => n.id === t))),
+      );
+      again.settings.openTabIds = validTabs;
       set({
         ready: true,
         folders: again.folders,

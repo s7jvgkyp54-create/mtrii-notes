@@ -22,6 +22,7 @@ import {
   Search,
   PanelLeft,
   MoreHorizontal,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,20 @@ export function EditorView({ notebookId }: { notebookId: string }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  const handleCloseTab = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const remaining = tabs.filter((t) => t !== id);
+    useNotesStore.getState().closeTab(id);
+    if (id === notebookId) {
+      if (remaining.length > 0) {
+        const nextId = remaining[remaining.length - 1];
+        void navigate({ to: "/notebook/$id", params: { id: nextId } });
+      } else {
+        void navigate({ to: "/" });
+      }
+    }
+  };
+
   const visiblePages = useMemo(() => {
     if (pageMode === "single") return pages.filter((_, i) => i === pageIndex);
     return pages;
@@ -121,22 +136,37 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             <ArrowLeft /> Thư viện
           </Button>
           <div className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto md:flex">
-            {tabs.map((id) => {
+            {Array.from(new Set(tabs)).map((id) => {
               const n = notebooks.find((x) => x.id === id);
               if (!n) return null;
               const on = id === notebookId;
               return (
-                <button
+                <div
                   key={id}
-                  type="button"
                   onClick={() => void navigate({ to: "/notebook/$id", params: { id } })}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) handleCloseTab(id, e);
+                  }}
                   className={cn(
-                    "max-w-44 truncate rounded-md px-3 py-1.5 text-xs font-medium",
-                    on ? "bg-accent-soft text-accent" : "hover:bg-overlay",
+                    "group flex max-w-48 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors select-none",
+                    on
+                      ? "bg-accent-soft text-accent"
+                      : "text-muted hover:bg-overlay hover:text-fg",
                   )}
                 >
-                  {n.name}
-                </button>
+                  <span className="truncate">{n.name}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleCloseTab(id, e)}
+                    className={cn(
+                      "flex size-4 items-center justify-center rounded-sm transition-opacity hover:bg-black/15 dark:hover:bg-white/15 hover:text-destructive",
+                      on ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70 hover:opacity-100",
+                    )}
+                    title="Đóng tệp này"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
               );
             })}
           </div>
