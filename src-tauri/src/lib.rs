@@ -79,8 +79,57 @@ fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
     let backups = root.join("backups");
     fs::create_dir_all(&assets).map_err(err)?;
     fs::create_dir_all(&backups).map_err(err)?;
+    let db_path = root.join("notes.sqlite3");
+
+    // Auto-migration: check legacy paths (com.notes.desktop / com.mtrii.notes)
+    if let Some(parent) = root.parent() {
+        let legacy_candidates = [
+            parent.join("com.notes.desktop"),
+            parent.join("com.mtrii.notes"),
+        ];
+        for candidate in &legacy_candidates {
+            if candidate != &root && candidate.exists() {
+                let old_db = candidate.join("notes.sqlite3");
+                if old_db.exists() {
+                    let should_copy = if !db_path.exists() {
+                        true
+                    } else if let (Ok(curr_meta), Ok(old_meta)) = (fs::metadata(&db_path), fs::metadata(&old_db)) {
+                        old_meta.len() > curr_meta.len() && curr_meta.len() <= 81920
+                    } else {
+                        false
+                    };
+                    if should_copy {
+                        let _ = fs::copy(&old_db, &db_path);
+                    }
+                }
+                let old_assets = candidate.join("assets");
+                if old_assets.exists() {
+                    if let Ok(entries) = fs::read_dir(&old_assets) {
+                        for entry in entries.flatten() {
+                            let target = assets.join(entry.file_name());
+                            if !target.exists() {
+                                let _ = fs::copy(entry.path(), target);
+                            }
+                        }
+                    }
+                }
+                let old_backups = candidate.join("backups");
+                if old_backups.exists() {
+                    if let Ok(entries) = fs::read_dir(&old_backups) {
+                        for entry in entries.flatten() {
+                            let target = backups.join(entry.file_name());
+                            if !target.exists() {
+                                let _ = fs::copy(entry.path(), target);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(StoragePaths {
-        database: root.join("notes.sqlite3"),
+        database: db_path,
         root,
         assets,
         backups,
