@@ -5,6 +5,8 @@ import { AppBoot } from "@/components/notes/app-boot";
 import { EditorView } from "@/components/notes/editor-view";
 import { LibraryView } from "@/components/notes/library-view";
 import { SettingsView } from "@/components/notes/settings-view";
+import { PomodoroMini } from "@/components/notes/pomodoro-mini";
+import { PomodoroPanel } from "@/components/notes/pomodoro-panel";
 import {
   NotesNavigationProvider,
   type NotesDestination,
@@ -18,6 +20,7 @@ type DesktopRoute =
 
 function DesktopApp() {
   const [route, setRoute] = useState<DesktopRoute>({ view: "library" });
+  const [showPomodoroPanel, setShowPomodoroPanel] = useState(false);
   const navigate = useCallback((destination: NotesDestination) => {
     if (destination.to === "/settings") setRoute({ view: "settings" });
     else if (destination.to === "/notebook/$id") {

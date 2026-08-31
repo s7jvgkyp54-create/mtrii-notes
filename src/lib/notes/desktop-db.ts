@@ -11,7 +11,7 @@ import type {
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
 
-type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups";
+type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups" | "pomodoroHistory";
 
 type AssetPayload = {
   meta: Omit<AssetRecord, "blob">;
@@ -283,3 +283,13 @@ export async function restoreBackupChain(targetBackupId: string) {
         await importDump(preview.dump, isFull);
     }
 }
+
+export const putPomodoroRecord = (record: import("./types").PomodoroRecord) => put("pomodoroHistory", record.id, record);
+export const getPomodoroHistory = () => all<import("./types").PomodoroRecord>("pomodoroHistory");
+export const clearPomodoroHistory = async () => {
+    const records = await getPomodoroHistory();
+    for (const r of records) await remove("pomodoroHistory", r.id);
+};
+
+export const putPomodoroSession = (session: import("./types").PomodoroSession | null) => kvPut("pomodoroSession", session);
+export const getPomodoroSession = () => kvGet<import("./types").PomodoroSession>("pomodoroSession");

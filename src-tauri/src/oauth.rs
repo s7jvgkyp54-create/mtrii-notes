@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use std::net::{TcpListener};
 use std::io::{Read, Write};
-use url::Url;
+use std::net::TcpListener;
 use std::sync::mpsc;
 use std::time::Duration;
+use url::Url;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OAuthTokens {
@@ -17,13 +17,13 @@ pub fn start_local_server() -> Result<(String, mpsc::Receiver<String>), String> 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let redirect_uri = format!("http://127.0.0.1:{}/oauth2callback", port);
-    
+
     let (tx, rx) = mpsc::channel();
-    
+
     std::thread::spawn(move || {
         listener.set_nonblocking(true).ok();
         let start = std::time::Instant::now();
-        
+
         loop {
             if start.elapsed().as_secs() > 120 {
                 break;
@@ -34,7 +34,7 @@ pub fn start_local_server() -> Result<(String, mpsc::Receiver<String>), String> 
                     if let Ok(size) = stream.read(&mut buffer) {
                         let request = String::from_utf8_lossy(&buffer[..size]);
                         let first_line = request.lines().next().unwrap_or("");
-                        
+
                         if first_line.starts_with("GET ") {
                             let parts: Vec<&str> = first_line.split_whitespace().collect();
                             if parts.len() > 1 {
@@ -46,7 +46,7 @@ pub fn start_local_server() -> Result<(String, mpsc::Receiver<String>), String> 
                                             code = Some(v.into_owned());
                                         }
                                     }
-                                    
+
                                     if let Some(c) = code {
                                         let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><h1>Dang nhap thanh cong!</h1><p>Ban co the dong the nay va quay tro lai ung dung Notes.</p><script>window.close();</script></body></html>";
                                         stream.write_all(response.as_bytes()).ok();
@@ -109,5 +109,3 @@ pub async fn exchange_code(
         Err(format!("OAuth error: {}", err_text))
     }
 }
-
-

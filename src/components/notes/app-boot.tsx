@@ -1,3 +1,4 @@
+import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useNotesStore } from "@/lib/notes/store";
 import { APP_VERSION } from "@/lib/notes/types";
@@ -5,6 +6,45 @@ import { checkForGithubUpdates, type UpdateCheckResult } from "@/lib/notes/updat
 import { UpdateDialog } from "./update-dialog";
 
 export function AppBoot({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    let unlisten: any;
+    // Tauri v2 get current window
+    const win = getCurrentWindow();
+    if (win.label === "main") {
+        win.onResized(async (event) => {
+           const size = event.payload; // PhysicalSize
+           const isMinimized = await win.isMinimized();
+           
+           if (isMinimized) {
+               const s = useNotesStore.getState().pomodoroSession;
+               if (s) {
+                   // spawn floating window
+                   const fWin = new Window("pomodoro", {
+                      url: "/pomodoro-floating",
+                      title: "Pomodoro",
+                      width: 140,
+                      height: 80,
+                      transparent: true,
+                      decorations: false,
+                      alwaysOnTop: true,
+                      resizable: false,
+                      skipTaskbar: true
+                   });
+                   // It might fail if already exists, that's fine
+               }
+           } else {
+               // Restore main window => close floating window
+               try {
+                  const WebviewWindow = (await import("@tauri-apps/api/window")).Window;
+                  const fWin = new WebviewWindow("pomodoro");
+                  await fWin.close();
+               } catch(e) {}
+           }
+        }).then(f => unlisten = f).catch(console.error);
+    }
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
   const bootError = useNotesStore((s) => s.bootError);
   const ready = useNotesStore((s) => s.ready);
   const settings = useNotesStore((s) => s.settings);

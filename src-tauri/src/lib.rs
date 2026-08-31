@@ -3,25 +3,34 @@ use std::os::windows::process::CommandExt;
 mod oauth;
 
 #[tauri::command]
-async fn start_google_oauth(client_id: String, client_secret: String) -> Result<oauth::OAuthTokens, String> {
+async fn start_google_oauth(
+    client_id: String,
+    client_secret: String,
+) -> Result<oauth::OAuthTokens, String> {
     let (redirect_uri, rx) = oauth::start_local_server()?;
-    
+
     let auth_url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive.readonly",
         client_id, urlencoding::encode(&redirect_uri)
     );
-    
+
     // Open browser
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/C", "start", "", &auth_url.replace("&", "^&")]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &auth_url.replace("&", "^&")])
+        .spawn();
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(&auth_url).spawn();
     #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
-    
+    let _ = std::process::Command::new("xdg-open")
+        .arg(&auth_url)
+        .spawn();
+
     // Wait for code (with a 2-minute timeout handled by the server loop)
-    let code = rx.recv().map_err(|_| "Timeout hoac loi khi cho ma xac thuc".to_string())?;
-    
+    let code = rx
+        .recv()
+        .map_err(|_| "Timeout hoac loi khi cho ma xac thuc".to_string())?;
+
     // Exchange for tokens
     oauth::exchange_code(&client_id, &client_secret, &code, &redirect_uri).await
 }
@@ -36,38 +45,49 @@ async fn download_drive_file(
 ) -> Result<String, String> {
     let paths = paths(&app)?;
     let asset_id = uuid::Uuid::new_v4().to_string();
-    
+
     let client = reqwest::Client::new();
-    let url = format!("https://www.googleapis.com/drive/v3/files/{}?alt=media", file_id);
-    
-    let res = client.get(&url)
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+        file_id
+    );
+
+    let res = client
+        .get(&url)
         .header("Authorization", format!("Bearer {}", access_token))
         .send()
         .await
         .map_err(|e| format!("Loi khi goi API Google Drive: {}", e))?;
-        
+
     if !res.status().is_success() {
         return Err(format!("Google Drive tra ve loi: {}", res.status()));
     }
-    
+
     let bytes = res.bytes().await.map_err(|e| e.to_string())?;
-    
-    let ext = if mime_type == "application/pdf" { "pdf" } else { "png" };
+
+    let ext = if mime_type == "application/pdf" {
+        "pdf"
+    } else {
+        "png"
+    };
     let filename = format!("{}.{}", asset_id, ext);
     let path = paths.assets.join(&filename);
-    
+
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-    
+
     // Also save to database
     let db_path = paths.database.clone();
     let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-    
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     conn.execute(
         "INSERT INTO assets (id, kind, mime, name, byteLength, createdAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![asset_id, if ext == "pdf" { "pdf" } else { "image" }, mime_type, file_name, bytes.len() as i64, now],
     ).map_err(|e| e.to_string())?;
-    
+
     Ok(asset_id)
 }
 
@@ -184,7 +204,9 @@ fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
             if old_db.exists() {
                 let should_copy = if !db_path.exists() {
                     true
-                } else if let (Ok(curr_meta), Ok(old_meta)) = (fs::metadata(&db_path), fs::metadata(&old_db)) {
+                } else if let (Ok(curr_meta), Ok(old_meta)) =
+                    (fs::metadata(&db_path), fs::metadata(&old_db))
+                {
                     old_meta.len() > curr_meta.len() && curr_meta.len() <= 81920
                 } else {
                     false
@@ -362,7 +384,11 @@ fn put_value(connection: &Connection, entity: &str, id: &str, value: &Value) -> 
     Ok(())
 }
 
-fn query_json(connection: &Connection, sql: &str, bind: Option<&str>) -> Result<Vec<Value>, String> {
+fn query_json(
+    connection: &Connection,
+    sql: &str,
+    bind: Option<&str>,
+) -> Result<Vec<Value>, String> {
     let mut statement = connection.prepare(sql).map_err(err)?;
     let rows = if let Some(value) = bind {
         statement
@@ -469,7 +495,11 @@ fn cleanup_stale_temps(directory: &Path) {
     }
 }
 
-fn put_asset_row(connection: &Connection, payload: &AssetPayload, relative: &str) -> Result<(), String> {
+fn put_asset_row(
+    connection: &Connection,
+    payload: &AssetPayload,
+    relative: &str,
+) -> Result<(), String> {
     let meta_json = serde_json::to_string(&payload.meta).map_err(err)?;
     connection
         .execute(
@@ -532,11 +562,16 @@ fn native_delete(app: AppHandle, entity: String, id: String) -> Result<(), Strin
         "notebooks" => connection.execute("DELETE FROM notebooks WHERE id=?1", params![id]),
         "pages" => {
             connection
-                .execute("DELETE FROM page_objects WHERE page_id=?1", params![id.clone()])
+                .execute(
+                    "DELETE FROM page_objects WHERE page_id=?1",
+                    params![id.clone()],
+                )
                 .map_err(err)?;
             connection.execute("DELETE FROM pages WHERE id=?1", params![id])
         }
-        "pageObjects" => connection.execute("DELETE FROM page_objects WHERE page_id=?1", params![id]),
+        "pageObjects" => {
+            connection.execute("DELETE FROM page_objects WHERE page_id=?1", params![id])
+        }
         "bookmarks" => connection.execute("DELETE FROM bookmarks WHERE id=?1", params![id]),
         _ => return Err("Loại dữ liệu không hợp lệ".to_string()),
     }
@@ -548,10 +583,13 @@ fn native_delete(app: AppHandle, entity: String, id: String) -> Result<(), Strin
 fn native_get_kv(app: AppHandle, key: String) -> Result<Option<Value>, String> {
     let connection = connect(&app)?;
     let data = connection
-        .query_row("SELECT data FROM kv WHERE key=?1", params![key], |row| row.get::<_, String>(0))
+        .query_row("SELECT data FROM kv WHERE key=?1", params![key], |row| {
+            row.get::<_, String>(0)
+        })
         .optional()
         .map_err(err)?;
-    data.map(|json| serde_json::from_str(&json).map_err(err)).transpose()
+    data.map(|json| serde_json::from_str(&json).map_err(err))
+        .transpose()
 }
 
 #[tauri::command]
@@ -734,7 +772,12 @@ fn native_import_dump(app: AppHandle, payload: ImportPayload, replace: bool) -> 
         put_value(&transaction, "pages", &value_id(value, "id")?, value)?;
     }
     for value in &payload.page_objects {
-        put_value(&transaction, "pageObjects", &value_id(value, "pageId")?, value)?;
+        put_value(
+            &transaction,
+            "pageObjects",
+            &value_id(value, "pageId")?,
+            value,
+        )?;
     }
     for value in &payload.bookmarks {
         put_value(&transaction, "bookmarks", &value_id(value, "id")?, value)?;
@@ -815,17 +858,13 @@ fn native_open_data_folder(app: AppHandle) -> Result<(), String> {
     }
 }
 
-
 #[tauri::command]
 fn native_open_browser_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let mut cmd = std::process::Command::new("cmd");
         cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd
-            .args(["/c", "start", "", &url])
-            .spawn()
-            .map_err(err)?;
+        cmd.args(["/c", "start", "", &url]).spawn().map_err(err)?;
         Ok(())
     }
     #[cfg(not(target_os = "windows"))]
@@ -863,7 +902,15 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
         let mut cmd = std::process::Command::new("curl.exe");
         cmd.creation_flags(CREATE_NO_WINDOW);
         let status = cmd
-            .args(["-L", "-f", "-s", "-S", "-o", &file_path.to_string_lossy(), &url])
+            .args([
+                "-L",
+                "-f",
+                "-s",
+                "-S",
+                "-o",
+                &file_path.to_string_lossy(),
+                &url,
+            ])
             .status();
 
         let success = match status {
@@ -908,7 +955,10 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![start_google_oauth, download_drive_file, 
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![
+            start_google_oauth,
+            download_drive_file,
             native_initialize,
             native_get_all,
             native_get_by_notebook,
@@ -934,6 +984,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("Không thể khởi động Notes");
 }
-
-
-

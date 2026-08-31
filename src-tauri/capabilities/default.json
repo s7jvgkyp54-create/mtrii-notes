@@ -2,6 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Quyền tối thiểu cho cửa sổ chính của Notes",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "windows": [
+    "main",
+    "pomodoro"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-create",
+    "notification:default"
+  ]
 }

@@ -151,6 +151,7 @@ export interface AssetRecord {
 }
 
 export interface AppSettings {
+  pomodoro: PomodoroSettings;
   theme: "light" | "dark";
   penOnly: boolean;
   favoriteColors: string[];
@@ -248,6 +249,19 @@ export const GOOGLE_CLIENT_SECRET = "GOCSPX-" + "e_MIUpuTeqNI6WSBxm6iyK2JFTms";
 export const GOOGLE_API_KEY = "AQ." + "Ab8RN6K9o1CAXgAkh85yjWicdoHugz2PPFkmZdYnT3E1qA8pFw";
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  pomodoro: {
+    focusDuration: 25,
+    shortBreakDuration: 5,
+    longBreakDuration: 15,
+    longBreakInterval: 4,
+    autoStartBreak: false,
+    autoStartFocus: false,
+    soundEnabled: true,
+    soundVolume: 0.5,
+    notificationsEnabled: true,
+    showMiniClock: true,
+    pinFloatingWindow: false,
+  },
   theme: "light",
   penOnly: false,
   favoriteColors: ["#1C1917", "#B91C1C", "#1D4ED8", "#FACC15"],
@@ -288,4 +302,45 @@ export interface BackupManifest {
   appVersion: string;
   dbVersion: number;
   encrypted: boolean;
+}
+
+export interface PomodoroSettings {
+  focusDuration: number; // in minutes
+  shortBreakDuration: number;
+  longBreakDuration: number;
+  longBreakInterval: number; // sessions before long break
+  autoStartBreak: boolean;
+  autoStartFocus: boolean;
+  soundEnabled: boolean;
+  soundVolume: number;
+  notificationsEnabled: boolean;
+  showMiniClock: boolean;
+  pinFloatingWindow: boolean;
+}
+
+export type PomodoroPhase = "focus" | "shortBreak" | "longBreak";
+
+export interface PomodoroSession {
+  phase: PomodoroPhase;
+  startTime: number;
+  durationMs: number;
+  pausedTotalMs: number;
+  lastPausedAt: number | null; // null if running
+  taskId: string | null;
+  taskName: string | null;
+  notebookId: string | null;
+  pageId: string | null;
+  completedSessions: number;
+}
+
+export interface PomodoroRecord {
+  id: string;
+  startTime: number;
+  endTime: number;
+  durationMs: number;
+  phase: PomodoroPhase;
+  status: "completed" | "skipped" | "cancelled";
+  taskName: string | null;
+  notebookId: string | null;
+  pageId: string | null;
 }

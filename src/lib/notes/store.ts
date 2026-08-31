@@ -53,6 +53,9 @@ interface HistoryBuf {
 }
 
 interface NotesState {
+  pomodoroSession: import("./types").PomodoroSession | null;
+  pomodoroHistory: import("./types").PomodoroRecord[];
+  pomodoroTick: number;
   ready: boolean;
   bootError: string | null;
   folders: Folder[];
@@ -249,7 +252,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         ),
       );
       again.settings.openTabIds = validTabs;
-      set({
+        const pomSession = await db.getPomodoroSession();
+        const pomHistory = await db.getPomodoroHistory();
+        set({
+          pomodoroSession: pomSession,
+          pomodoroHistory: pomHistory,
         ready: true,
         folders: again.folders,
         notebooks: again.notebooks,
