@@ -162,21 +162,30 @@ export function LibraryView() {
           {folders
             .filter((f) => !f.deletedAt)
             .map((f) => (
-              <button
+              <div
                 key={f.id}
-                type="button"
-                onClick={() => {
-                  useNotesStore.getState().setFolder(f.id);
-                  useNotesStore.getState().setSidebarOpen(false);
-                }}
                 className={cn(
-                  "flex h-10 items-center gap-3 rounded-md px-3 text-sm cursor-pointer transition-colors",
-                  section === "all" && folderId === f.id ? "bg-accent-soft font-medium text-accent" : "hover:bg-overlay",
+                  "group flex h-10 items-center justify-between rounded-md px-2.5 text-sm transition-colors",
+                  section === "all" && folderId === f.id
+                    ? "bg-accent-soft font-medium text-accent"
+                    : "hover:bg-overlay text-fg",
                 )}
               >
-                <FolderIcon className="size-4 text-accent/80" />
-                <span className="truncate">{f.name}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    useNotesStore.getState().setFolder(f.id);
+                    useNotesStore.getState().setSidebarOpen(false);
+                  }}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left cursor-pointer"
+                >
+                  <FolderIcon className="size-4 shrink-0 text-accent/80" />
+                  <span className="truncate">{f.name}</span>
+                </button>
+                <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                  <FolderMenu folder={f} />
+                </div>
+              </div>
             ))}
           <button
             type="button"
@@ -312,21 +321,26 @@ export function LibraryView() {
         <div className="flex-1 overflow-auto p-4 pb-24 md:p-6 md:pb-6">
           {/* Breadcrumb Navigation when inside a folder */}
           {folderId && currentFolder ? (
-            <nav aria-label="Breadcrumb" className="mb-5 flex items-center gap-1.5 text-xs text-muted">
-              <button
-                type="button"
-                onClick={() => useNotesStore.getState().setFolder(null)}
-                className="flex items-center gap-1 font-medium hover:text-accent cursor-pointer transition-colors"
-              >
-                <LayoutGrid className="size-3.5" />
-                Tất cả tài liệu
-              </button>
-              <ChevronRight className="size-3 text-muted/40" />
-              <span className="flex items-center gap-1 font-semibold text-fg">
-                <FolderOpen className="size-3.5 text-accent" />
-                {currentFolder.name}
-              </span>
-            </nav>
+            <div className="mb-5 flex items-center justify-between">
+              <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-xs text-muted">
+                <button
+                  type="button"
+                  onClick={() => useNotesStore.getState().setFolder(null)}
+                  className="flex items-center gap-1 font-medium hover:text-accent cursor-pointer transition-colors"
+                >
+                  <LayoutGrid className="size-3.5" />
+                  Tất cả tài liệu
+                </button>
+                <ChevronRight className="size-3 text-muted/40" />
+                <span className="flex items-center gap-1 font-semibold text-fg">
+                  <FolderOpen className="size-3.5 text-accent" />
+                  {currentFolder.name}
+                </span>
+              </nav>
+              <div className="flex items-center gap-1">
+                <FolderMenu folder={currentFolder} />
+              </div>
+            </div>
           ) : null}
 
           {isEmpty ? (
@@ -613,6 +627,7 @@ function FolderRow({ folder }: { folder: Folder }) {
 
 function FolderMenu({ folder }: { folder: Folder }) {
   const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(folder.name);
   const s = useNotesStore.getState();
 
@@ -627,13 +642,7 @@ function FolderMenu({ folder }: { folder: Folder }) {
       >
         <MenuItem onSelect={() => setRenameOpen(true)}>Đổi tên</MenuItem>
         <MenuSep />
-        <MenuItem
-          danger
-          onSelect={() => {
-            void s.deleteFolder(folder.id);
-            toast.success(`Đã xóa thư mục ${folder.name}`);
-          }}
-        >
+        <MenuItem danger onSelect={() => setDeleteOpen(true)}>
           Xóa thư mục
         </MenuItem>
       </DropdownMenu>
@@ -651,6 +660,27 @@ function FolderMenu({ folder }: { folder: Folder }) {
             }}
           >
             Lưu
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen} title={`Xóa thư mục "${folder.name}"?`}>
+        <p className="text-sm text-muted">
+          Bạn có chắc chắn muốn xóa thư mục này không? Các sổ tay bên trong sẽ được chuyển ra ngoài màn hình chính (không bị mất dữ liệu).
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
+            Hủy
+          </Button>
+          <Button
+            variant="danger"
+            onClick={async () => {
+              await s.deleteFolder(folder.id);
+              setDeleteOpen(false);
+              toast.success(`Đã xóa thư mục ${folder.name}`);
+            }}
+          >
+            Xóa thư mục
           </Button>
         </div>
       </Dialog>

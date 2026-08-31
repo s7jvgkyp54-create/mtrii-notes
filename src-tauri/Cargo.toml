@@ -1,6 +1,6 @@
 [package]
 name = "mtrii-notes"
-version = "0.2.4"
+version = "0.2.5"
 description = "Mtrii Notes - so tay so cho Windows"
 authors = ["Mtrii"]
 edition = "2021"
