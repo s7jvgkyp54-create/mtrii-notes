@@ -47,87 +47,86 @@ function flipY(y: number, pageH: number) {
   return pageH - y;
 }
 
-async function drawObjectsOnPdfPage(
-  pdfPage: import("pdf-lib").PDFPage,
+// Rasterize all annotations (strokes, shapes, text, images) onto a canvas
+// then embed the result as a PNG layer into the PDF page.
+// This approach guarantees the exported PDF is always viewable.
+async function rasterizeAnnotations(
   objects: CanvasObject[],
+  pageW: number,
   pageH: number,
-  embedImage: (assetId: string) => Promise<void>,
-) {
-  for (const o of objects) {
-    if (o.type === "stroke") {
-      const path = strokeToSvgPath(o);
-      if (!path) continue;
-      const flipped = path.replace(
-        /([ML])\s+([-\d.]+)\s+([-\d.]+)/g,
-        (_, cmd: string, x: string, y: string) =>
-          `${cmd} ${x} ${flipY(Number(y), pageH).toFixed(2)}`,
-      );
-      const color = hexRgb(o.color);
-      const opacity = o.tool === "highlighter" ? 0.38 : o.tool === "pencil" ? 0.78 : 1;
-      pdfPage.drawSvgPath(flipped, {
-        borderColor: color,
-        borderWidth: o.width,
-        borderOpacity: opacity,
-        borderLineCap: 1,
-      });
-    } else if (o.type === "shape") {
-      const color = hexRgb(o.color);
-      if (o.shape === "line" || o.shape === "arrow") {
-        pdfPage.drawLine({
-          start: { x: o.x1, y: flipY(o.y1, pageH) },
-          end: { x: o.x2, y: flipY(o.y2, pageH) },
-          thickness: o.width,
-          color,
-        });
-      } else if (o.shape === "rect") {
-        pdfPage.drawRectangle({
-          x: Math.min(o.x1, o.x2),
-          y: flipY(Math.max(o.y1, o.y2), pageH),
-          width: Math.abs(o.x2 - o.x1),
-          height: Math.abs(o.y2 - o.y1),
-          borderWidth: o.width,
-          borderColor: color,
-        });
-      } else {
-        pdfPage.drawEllipse({
-          x: (o.x1 + o.x2) / 2,
-          y: flipY((o.y1 + o.y2) / 2, pageH),
-          xScale: Math.abs(o.x2 - o.x1) / 2 || 1,
-          yScale: Math.abs(o.y2 - o.y1) / 2 || 1,
-          borderWidth: o.width,
-          borderColor: color,
-        });
-      }
-    } else if (o.type === "text") {
-      const font = await pdfPage.doc.embedFont(StandardFonts.Helvetica);
-      const lines = o.text.split("\n");
-      lines.forEach((line, i) => {
-        const safe = line.replace(/[^\x00-\x7F]/g, "?");
-        pdfPage.drawText(safe, {
-          x: o.x,
-          y: flipY(o.y + o.fontSize + i * o.fontSize * 1.35, pageH),
-          size: o.fontSize,
-          font,
-          color: hexRgb(o.color),
-          maxWidth: o.w,
-        });
-      });
-      // Vietnamese glyphs: overlay rasterized text when needed
-      if (/[^\x00-\x7F]/.test(o.text)) {
-        const img = await rasterizeText(o);
-        if (img) {
-          const embedded = await pdfPage.doc.embedPng(img);
-          pdfPage.drawImage(embedded, {
-            x: o.x,
-            y: flipY(o.y + o.h, pageH),
-            width: o.w,
-            height: o.h,
+  scale: number,
+): Promise<Uint8Array | null> {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(pageW * scale);
+    canvas.height = Math.round(pageH * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.scale(scale, scale);
+
+    const { drawStroke, drawShape, drawText } = await import("./render");
+
+    for (const o of objects) {
+      if (o.type === "stroke") {
+        drawStroke(ctx, o);
+      } else if (o.type === "shape") {
+        drawShape(ctx, o);
+      } else if (o.type === "text") {
+        drawText(ctx, o);
+      } else if (o.type === "image") {
+        try {
+          const { getAsset, objectUrlFor } = await import("./db");
+          const asset = await getAsset(o.assetId);
+          if (!asset) continue;
+          const url = objectUrlFor(o.assetId, asset.blob);
+          await new Promise<void>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+              ctx.save();
+              ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
+              ctx.rotate((o.rotation * Math.PI) / 180);
+              ctx.drawImage(img, -o.w / 2, -o.h / 2, o.w, o.h);
+              ctx.restore();
+              resolve();
+            };
+            img.onerror = () => reject(new Error("Cannot load image"));
+            img.src = url;
           });
+        } catch {
+          /* skip missing image */
         }
       }
-    } else if (o.type === "image") {
-      await embedImage(o.assetId);
     }
+
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/png"));
+    if (!blob) return null;
+    return new Uint8Array(await blob.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+async function drawObjectsOnPdfPage(
+  pdfDoc: PDFDocument,
+  pdfPage: import("pdf-lib").PDFPage,
+  objects: CanvasObject[],
+  pageW: number,
+  pageH: number,
+) {
+  if (!objects.length) return;
+  // Rasterize at 2x for sharpness
+  const png = await rasterizeAnnotations(objects, pageW, pageH, 2);
+  if (!png) return;
+  try {
+    const embedded = await pdfDoc.embedPng(png);
+    pdfPage.drawImage(embedded, {
+      x: 0,
+      y: 0,
+      width: pageW,
+      height: pageH,
+    });
+  } catch {
+    /* skip if embedding fails */
   }
 }
 
@@ -202,7 +201,7 @@ export async function exportNotebookPdf(opts: {
       });
     };
 
-    await drawObjectsOnPdfPage(pdfPage, objs, pageH, embedImage);
+    await drawObjectsOnPdfPage(pdf, pdfPage, objs, pdfPage.getWidth(), pdfPage.getHeight());
   }
 
   pdf.setTitle(notebook.name);
