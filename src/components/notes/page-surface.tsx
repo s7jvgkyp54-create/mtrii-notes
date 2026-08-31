@@ -110,6 +110,7 @@ export function PageSurface({
     startX: number;
     startY: number;
     box: { x: number; y: number; w: number; h: number };
+    handle: "tl" | "tr" | "bl" | "br";
     originals: CanvasObject[];
     before: CanvasObject[];
   } | null>(null);
@@ -741,19 +742,72 @@ export function PageSurface({
     [],
   );
 
+  const startResizeSession = (event: React.PointerEvent, handle: "tl" | "tr" | "bl" | "br") => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resize.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      box: selectionBounds!,
+      handle,
+      originals: selectedObjects,
+      before: useNotesStore.getState().objectsByPage[page.id] ?? objects,
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      moveEvent.preventDefault();
+      updateResize(moveEvent.pointerId, moveEvent.clientX, moveEvent.clientY);
+    };
+    const onUp = (upEvent: PointerEvent) => {
+      upEvent.preventDefault();
+      finishResize(upEvent.pointerId);
+    };
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp, { passive: false });
+    window.addEventListener("pointercancel", onUp, { passive: false });
+    resizeCleanup.current = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  };
+
   function updateResize(pointerId: number, clientX: number, clientY: number) {
     const session = resize.current;
     if (!session || session.pointerId !== pointerId) return;
 
     const dx = (clientX - session.startX) / zoom;
     const dy = (clientY - session.startY) / zoom;
-    const relativeX = dx / Math.max(1, session.box.w);
-    const relativeY = dy / Math.max(1, session.box.h);
+    
+    let relativeX = 0;
+    let relativeY = 0;
+    
+    if (session.handle === "br") {
+      relativeX = dx / Math.max(1, session.box.w);
+      relativeY = dy / Math.max(1, session.box.h);
+    } else if (session.handle === "tl") {
+      relativeX = -dx / Math.max(1, session.box.w);
+      relativeY = -dy / Math.max(1, session.box.h);
+    } else if (session.handle === "tr") {
+      relativeX = dx / Math.max(1, session.box.w);
+      relativeY = -dy / Math.max(1, session.box.h);
+    } else if (session.handle === "bl") {
+      relativeX = -dx / Math.max(1, session.box.w);
+      relativeY = dy / Math.max(1, session.box.h);
+    }
+
     const factor = clamp(
       1 + (Math.abs(relativeX) >= Math.abs(relativeY) ? relativeX : relativeY),
       0.15,
       8,
     );
+    
+    let origin = { x: session.box.x, y: session.box.y };
+    if (session.handle === "tl") origin = { x: session.box.x + session.box.w, y: session.box.y + session.box.h };
+    else if (session.handle === "tr") origin = { x: session.box.x, y: session.box.y + session.box.h };
+    else if (session.handle === "bl") origin = { x: session.box.x + session.box.w, y: session.box.y };
+
     const originals = new Map(session.originals.map((object) => [object.id, object]));
     const state = useNotesStore.getState();
     const current = state.objectsByPage[page.id] ?? [];
@@ -762,7 +816,7 @@ export function PageSurface({
         ...state.objectsByPage,
         [page.id]: current.map((object) => {
           const original = originals.get(object.id);
-          return original ? scaleObjectFromTopLeft(original, session.box, factor) : object;
+          return original ? scaleObjectFromOrigin(original, origin, factor) : object;
         }),
       },
     });
@@ -859,39 +913,35 @@ export function PageSurface({
         >
           <button
             type="button"
-            className="pointer-events-auto absolute -right-3 -bottom-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none"
-            aria-label="Kéo để đổi kích thước"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              event.currentTarget.setPointerCapture(event.pointerId);
-              resize.current = {
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-                box: selectionBounds,
-                originals: selectedObjects,
-                before: useNotesStore.getState().objectsByPage[page.id] ?? objects,
-              };
-              const onMove = (moveEvent: PointerEvent) => {
-                moveEvent.preventDefault();
-                updateResize(moveEvent.pointerId, moveEvent.clientX, moveEvent.clientY);
-              };
-              const onUp = (upEvent: PointerEvent) => {
-                upEvent.preventDefault();
-                finishResize(upEvent.pointerId);
-              };
-              window.addEventListener("pointermove", onMove, { passive: false });
-              window.addEventListener("pointerup", onUp, { passive: false });
-              window.addEventListener("pointercancel", onUp, { passive: false });
-              resizeCleanup.current = () => {
-                window.removeEventListener("pointermove", onMove);
-                window.removeEventListener("pointerup", onUp);
-                window.removeEventListener("pointercancel", onUp);
-              };
-            }}
+            className="pointer-events-auto absolute -top-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
+            aria-label="K?o ?? ??i k?ch th??c"
+            onPointerDown={(event) => startResizeSession(event, "tl")}
+          >
+            <MoveDiagonal2 className="size-3.5 rotate-90" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute -top-3 -right-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
+            aria-label="K?o ?? ??i k?ch th??c"
+            onPointerDown={(event) => startResizeSession(event, "tr")}
           >
             <MoveDiagonal2 className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute -bottom-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
+            aria-label="K?o ?? ??i k?ch th??c"
+            onPointerDown={(event) => startResizeSession(event, "bl")}
+          >
+            <MoveDiagonal2 className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute -right-3 -bottom-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
+            aria-label="K?o ?? ??i k?ch th??c"
+            onPointerDown={(event) => startResizeSession(event, "br")}
+          >
+            <MoveDiagonal2 className="size-3.5 rotate-90" />
           </button>
         </div>
       ) : null}
@@ -1149,14 +1199,14 @@ function scaleObject(
   };
 }
 
-function scaleObjectFromTopLeft(
+function scaleObjectFromOrigin(
   object: CanvasObject,
-  box: { x: number; y: number; w: number; h: number },
+  origin: { x: number; y: number },
   factor: number,
 ): CanvasObject {
   const scale = (x: number, y: number) => ({
-    x: box.x + (x - box.x) * factor,
-    y: box.y + (y - box.y) * factor,
+    x: origin.x + (x - origin.x) * factor,
+    y: origin.y + (y - origin.y) * factor,
   });
 
   if (object.type === "stroke") {
