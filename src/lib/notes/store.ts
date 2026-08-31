@@ -860,7 +860,13 @@ export function visibleNotebooks() {
     if (s.section === "recent") {
       list = list.filter((n) => n.lastOpenedAt).sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
     }
-    if (s.section === "all" && s.folderId) list = list.filter((n) => n.folderId === s.folderId);
+    if (s.section === "all") {
+      if (s.folderId) {
+        list = list.filter((n) => n.folderId === s.folderId);
+      } else if (!s.query.trim()) {
+        list = list.filter((n) => !n.folderId);
+      }
+    }
   }
   if (s.query.trim()) {
     const q = s.query.trim().toLowerCase();
