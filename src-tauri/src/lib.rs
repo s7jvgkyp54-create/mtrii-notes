@@ -74,58 +74,91 @@ fn err<E: std::fmt::Display>(error: E) -> String {
 }
 
 fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
-    let root = app.path().app_local_data_dir().map_err(err)?;
+    // Partition 1: Permanent Isolated Vault (AppData/Roaming/NotesData)
+    // Completely separated from installation folder, app identifiers, or uninstallers.
+    let base_roaming = app.path().app_data_dir().map_err(err)?;
+    let root = if let Some(roaming_parent) = base_roaming.parent() {
+        roaming_parent.join("NotesData")
+    } else {
+        base_roaming.clone()
+    };
+
     let assets = root.join("assets");
     let backups = root.join("backups");
+    let mirror_dir = root.join("mirror_vault");
+    fs::create_dir_all(&root).map_err(err)?;
     fs::create_dir_all(&assets).map_err(err)?;
     fs::create_dir_all(&backups).map_err(err)?;
+    fs::create_dir_all(&mirror_dir).map_err(err)?;
     let db_path = root.join("notes.sqlite3");
+    let mirror_db = mirror_dir.join("notes_mirror.sqlite3");
 
-    // Auto-migration: check legacy paths (com.notes.desktop / com.mtrii.notes)
-    if let Some(parent) = root.parent() {
-        let legacy_candidates = [
-            parent.join("com.notes.desktop"),
-            parent.join("com.mtrii.notes"),
-        ];
-        for candidate in &legacy_candidates {
-            if candidate != &root && candidate.exists() {
-                let old_db = candidate.join("notes.sqlite3");
-                if old_db.exists() {
-                    let should_copy = if !db_path.exists() {
-                        true
-                    } else if let (Ok(curr_meta), Ok(old_meta)) = (fs::metadata(&db_path), fs::metadata(&old_db)) {
-                        old_meta.len() > curr_meta.len() && curr_meta.len() <= 81920
-                    } else {
-                        false
-                    };
-                    if should_copy {
-                        let _ = fs::copy(&old_db, &db_path);
-                    }
+    // Universal Data Collector: scan all previous local and roaming folders
+    let mut candidate_dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(local_data) = app.path().app_local_data_dir() {
+        if let Some(local_parent) = local_data.parent() {
+            candidate_dirs.push(local_parent.join("com.mtrii.notes"));
+            candidate_dirs.push(local_parent.join("com.notes.desktop"));
+            candidate_dirs.push(local_parent.join("Notes"));
+        }
+    }
+    if let Some(roaming_parent) = base_roaming.parent() {
+        candidate_dirs.push(roaming_parent.join("com.mtrii.notes"));
+        candidate_dirs.push(roaming_parent.join("com.notes.desktop"));
+        candidate_dirs.push(roaming_parent.join("Notes"));
+    }
+
+    for candidate in &candidate_dirs {
+        if candidate != &root && candidate.exists() {
+            let old_db = candidate.join("notes.sqlite3");
+            if old_db.exists() {
+                let should_copy = if !db_path.exists() {
+                    true
+                } else if let (Ok(curr_meta), Ok(old_meta)) = (fs::metadata(&db_path), fs::metadata(&old_db)) {
+                    old_meta.len() > curr_meta.len() && curr_meta.len() <= 81920
+                } else {
+                    false
+                };
+                if should_copy {
+                    let _ = fs::copy(&old_db, &db_path);
                 }
-                let old_assets = candidate.join("assets");
-                if old_assets.exists() {
-                    if let Ok(entries) = fs::read_dir(&old_assets) {
-                        for entry in entries.flatten() {
-                            let target = assets.join(entry.file_name());
-                            if !target.exists() {
-                                let _ = fs::copy(entry.path(), target);
-                            }
+            }
+            let old_assets = candidate.join("assets");
+            if old_assets.exists() {
+                if let Ok(entries) = fs::read_dir(&old_assets) {
+                    for entry in entries.flatten() {
+                        let target = assets.join(entry.file_name());
+                        if !target.exists() {
+                            let _ = fs::copy(entry.path(), target);
                         }
                     }
                 }
-                let old_backups = candidate.join("backups");
-                if old_backups.exists() {
-                    if let Ok(entries) = fs::read_dir(&old_backups) {
-                        for entry in entries.flatten() {
-                            let target = backups.join(entry.file_name());
-                            if !target.exists() {
-                                let _ = fs::copy(entry.path(), target);
-                            }
+            }
+            let old_backups = candidate.join("backups");
+            if old_backups.exists() {
+                if let Ok(entries) = fs::read_dir(&old_backups) {
+                    for entry in entries.flatten() {
+                        let target = backups.join(entry.file_name());
+                        if !target.exists() {
+                            let _ = fs::copy(entry.path(), target);
                         }
                     }
                 }
             }
         }
+    }
+
+    // Partition 2: Self-Healing Mirror Replication
+    // If main DB exists, maintain a real-time mirror copy in partition 2
+    if db_path.exists() {
+        if let Ok(meta) = fs::metadata(&db_path) {
+            if meta.len() > 0 {
+                let _ = fs::copy(&db_path, &mirror_db);
+            }
+        }
+    } else if mirror_db.exists() {
+        // Self-Healing: restore from Partition 2 mirror if primary was somehow missing
+        let _ = fs::copy(&mirror_db, &db_path);
     }
 
     Ok(StoragePaths {
