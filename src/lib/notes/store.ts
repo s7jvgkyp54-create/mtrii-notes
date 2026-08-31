@@ -43,7 +43,7 @@ const defaultTool: ToolState = {
   highlighterWidth: 18,
   eraserMode: "stroke",
   eraserWidth: 16,
-  fontSize: 16,
+  fontSize: 22,
   shapeSnap: true,
 };
 
@@ -137,7 +137,12 @@ interface NotesState {
   setPagePaper: (pageId: string, paper: PaperStyle) => Promise<void>;
   reorderPages: (from: number, to: number) => Promise<void>;
 
-  commitObjects: (pageId: string, objects: CanvasObject[], undoable?: boolean, beforeState?: CanvasObject[]) => void;
+  commitObjects: (
+    pageId: string,
+    objects: CanvasObject[],
+    undoable?: boolean,
+    beforeState?: CanvasObject[],
+  ) => void;
   undo: () => void;
   redo: () => void;
   addBookmark: (pageId: string, title: string) => Promise<void>;
@@ -145,7 +150,10 @@ interface NotesState {
 
   exportPdf: (notebookId: string) => Promise<void>;
   exportBackup: (kind: "full" | "notebook", notebookId?: string) => Promise<void>;
-  importBackupFile: (file: File, mode: "merge" | "replace") => Promise<{ names: string[]; warnings: string[] }>;
+  importBackupFile: (
+    file: File,
+    mode: "merge" | "replace",
+  ) => Promise<{ names: string[]; warnings: string[] }>;
   previewBackup: (file: File) => Promise<BackupPreview>;
   runAutoBackup: () => Promise<void>;
   downloadStoredBackup: (id: string) => Promise<void>;
@@ -177,9 +185,9 @@ function enqueue(label: string, task: () => Promise<void>) {
 }
 
 function patchNb(id: string, partial: Partial<Notebook>) {
-  const notebooks = useNotesStore.getState().notebooks.map((n) =>
-    n.id === id ? { ...n, ...partial, updatedAt: Date.now() } : n,
-  );
+  const notebooks = useNotesStore
+    .getState()
+    .notebooks.map((n) => (n.id === id ? { ...n, ...partial, updatedAt: Date.now() } : n));
   useNotesStore.setState({ notebooks });
   const nb = notebooks.find((n) => n.id === id);
   if (nb) void enqueue("notebook", () => db.putNotebook(nb));
@@ -232,7 +240,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const again = await db.loadLibrary();
       const backups = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
       const validTabs = Array.from(
-        new Set((again.settings.openTabIds || []).filter((t) => again.notebooks.some((n) => n.id === t))),
+        new Set(
+          (again.settings.openTabIds || []).filter((t) => again.notebooks.some((n) => n.id === t)),
+        ),
       );
       again.settings.openTabIds = validTabs;
       set({
@@ -301,7 +311,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   renameFolder: async (id, name) => {
-    const folders = get().folders.map((f) => (f.id === id ? { ...f, name, updatedAt: Date.now() } : f));
+    const folders = get().folders.map((f) =>
+      f.id === id ? { ...f, name, updatedAt: Date.now() } : f,
+    );
     set({ folders });
     const f = folders.find((x) => x.id === id);
     if (f) await enqueue("folder", () => db.putFolder(f));
@@ -652,7 +664,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       .map((p, i) => ({ ...p, index: i }));
     const objectsByPage = { ...get().objectsByPage };
     delete objectsByPage[pageId];
-    set({ pages, objectsByPage, currentPageIndex: Math.min(get().currentPageIndex, pages.length - 1) });
+    set({
+      pages,
+      objectsByPage,
+      currentPageIndex: Math.min(get().currentPageIndex, pages.length - 1),
+    });
     const nbId = get().activeNotebookId;
     if (nbId) patchNb(nbId, { pageCount: pages.length });
     await enqueue("del-page", async () => {
@@ -664,7 +680,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   rotatePage: async (pageId) => {
     const pages = get().pages.map((p) =>
       p.id === pageId
-        ? { ...p, rotation: ((p.rotation + 90) % 360) as PageRecord["rotation"], updatedAt: Date.now() }
+        ? {
+            ...p,
+            rotation: ((p.rotation + 90) % 360) as PageRecord["rotation"],
+            updatedAt: Date.now(),
+          }
         : p,
     );
     set({ pages });
@@ -673,7 +693,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   setPagePaper: async (pageId, paper) => {
-    const pages = get().pages.map((p) => (p.id === pageId ? { ...p, paper, updatedAt: Date.now() } : p));
+    const pages = get().pages.map((p) =>
+      p.id === pageId ? { ...p, paper, updatedAt: Date.now() } : p,
+    );
     set({ pages });
     const page = pages.find((p) => p.id === pageId);
     if (page) await enqueue("paper", () => db.putPage(page));
@@ -695,7 +717,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (undoable) {
       const nbId = get().activeNotebookId ?? "x";
       const hist = get().history[nbId] ?? { past: [], future: [] };
-      hist.past = [...hist.past.slice(-49), { pageId, objects: beforeState ?? get().objectsByPage[pageId] ?? [] }];
+      hist.past = [
+        ...hist.past.slice(-49),
+        { pageId, objects: beforeState ?? get().objectsByPage[pageId] ?? [] },
+      ];
       hist.future = [];
       set({ history: { ...get().history, [nbId]: hist } });
     }
@@ -871,7 +896,9 @@ export function visibleNotebooks() {
     list = list.filter((n) => !n.deletedAt);
     if (s.section === "favorites") list = list.filter((n) => n.favorite);
     if (s.section === "recent") {
-      list = list.filter((n) => n.lastOpenedAt).sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
+      list = list
+        .filter((n) => n.lastOpenedAt)
+        .sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0));
     }
     if (s.section === "all") {
       if (s.folderId) {

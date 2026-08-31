@@ -1,11 +1,6 @@
 import type { CanvasObject, PaperStyle, ShapeObject, StrokeObject } from "./types";
 
-export function drawPaper(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  paper: PaperStyle,
-) {
+export function drawPaper(ctx: CanvasRenderingContext2D, w: number, h: number, paper: PaperStyle) {
   ctx.fillStyle = paper.color;
   ctx.fillRect(0, 0, w, h);
   ctx.save();
@@ -203,19 +198,77 @@ export function drawShape(ctx: CanvasRenderingContext2D, s: ShapeObject) {
   ctx.restore();
 }
 
-export function drawText(ctx: CanvasRenderingContext2D, t: Extract<CanvasObject, { type: "text" }>) {
+export function drawText(
+  ctx: CanvasRenderingContext2D,
+  t: Extract<CanvasObject, { type: "text" }>,
+) {
   ctx.save();
   ctx.fillStyle = t.color;
   ctx.font = `${t.fontSize}px "Be Vietnam Pro", "Segoe UI", sans-serif`;
   ctx.textAlign = t.align;
   ctx.textBaseline = "top";
   const x = t.align === "center" ? t.x + t.w / 2 : t.align === "right" ? t.x + t.w : t.x;
-  const lines = t.text.split("\n");
+  const lines = wrapCanvasText(ctx, t.text, t.w);
   const lh = t.fontSize * 1.35;
   lines.forEach((line, i) => {
-    ctx.fillText(line, x, t.y + i * lh, t.w);
+    ctx.fillText(line, x, t.y + i * lh);
   });
   ctx.restore();
+}
+
+/**
+ * Wrap text without using Canvas' maxWidth argument. maxWidth horizontally
+ * compresses long lines, which made paragraphs look much smaller than the
+ * selected font size. Explicit wrapping keeps the type size predictable.
+ */
+export function wrapCanvasText(
+  ctx: Pick<CanvasRenderingContext2D, "measureText">,
+  text: string,
+  maxWidth: number,
+) {
+  const width = Math.max(1, maxWidth);
+  const lines: string[] = [];
+
+  for (const paragraph of text.split("\n")) {
+    if (!paragraph) {
+      lines.push("");
+      continue;
+    }
+
+    let line = "";
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (ctx.measureText(candidate).width <= width) {
+        line = candidate;
+        continue;
+      }
+
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+
+      if (ctx.measureText(word).width <= width) {
+        line = word;
+        continue;
+      }
+
+      let chunk = "";
+      for (const character of Array.from(word)) {
+        const next = chunk + character;
+        if (chunk && ctx.measureText(next).width > width) {
+          lines.push(chunk);
+          chunk = character;
+        } else {
+          chunk = next;
+        }
+      }
+      line = chunk;
+    }
+    if (line) lines.push(line);
+  }
+
+  return lines.length ? lines : [""];
 }
 
 export function drawLasso(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {

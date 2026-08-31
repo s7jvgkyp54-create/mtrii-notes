@@ -18,11 +18,23 @@ import {
   type Pt,
 } from "@/lib/notes/geometry";
 import { drawLasso, drawPaper, drawShape, drawStroke, drawText } from "@/lib/notes/render";
-import { getAsset, objectUrlFor } from "@/lib/notes/db";
+import { getAsset, objectUrlFor, putAsset } from "@/lib/notes/db";
 import { loadPdfDocument, renderPdfPageBitmap } from "@/lib/notes/pdf";
 import { nid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Copy, CopyPlus, Minus, Plus, RotateCw, Trash2 } from "lucide-react";
+import {
+  Copy,
+  CopyPlus,
+  ImagePlus,
+  Minus,
+  MoveDiagonal2,
+  Plus,
+  RotateCw,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+
+export const OPEN_IMAGE_PICKER_EVENT = "notes:open-image-picker";
 
 const imageCache = new Map<string, HTMLImageElement>();
 
@@ -39,6 +51,28 @@ function loadImage(id: string, url: string) {
     img.onerror = () => reject(new Error("Không tải được ảnh"));
     img.src = url;
   });
+}
+
+async function readImageSize(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    return await new Promise<{ w: number; h: number }>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve({ w: image.naturalWidth, h: image.naturalHeight });
+      image.onerror = () => reject(new Error("Tệp ảnh không đọc được."));
+      image.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || /\.(avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name);
 }
 
 export function PageSurface({
@@ -68,6 +102,17 @@ export function PageSurface({
   const lastZoom = useRef<number>(0);
   const [editing, setEditing] = useState<Extract<CanvasObject, { type: "text" }> | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  const [dropActive, setDropActive] = useState(false);
+  const lastInsertPoint = useRef<Pt>({ x: page.width / 2, y: page.height / 2 });
+  const resize = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    box: { x: number; y: number; w: number; h: number };
+    originals: CanvasObject[];
+    before: CanvasObject[];
+  } | null>(null);
+  const resizeCleanup = useRef<(() => void) | null>(null);
   const drag = useRef<{
     kind: "move" | "lasso";
     last: Pt;
@@ -79,6 +124,107 @@ export function PageSurface({
   const cssH = disp.h * zoom;
   const selectedObjects = objects.filter((object) => selected.includes(object.id));
   const selectionBounds = unionBBox(selectedObjects);
+  const onlyTextSelected =
+    selectedObjects.length > 0 && selectedObjects.every((object) => object.type === "text");
+  const selectedTextSize = onlyTextSelected
+    ? Math.round((selectedObjects[0] as Extract<CanvasObject, { type: "text" }>).fontSize)
+    : null;
+
+  const activatePage = useCallback(() => {
+    const state = useNotesStore.getState();
+    const index = state.pages.findIndex((candidate) => candidate.id === page.id);
+    if (index >= 0 && state.currentPageIndex !== index) state.setPageIndex(index);
+  }, [page.id]);
+
+  const insertImageFile = useCallback(
+    async (file: File, anchor: Pt) => {
+      const mime = file.type || "image/png";
+      if (!mime.startsWith("image/")) throw new Error("Tệp đã chọn không phải là ảnh.");
+
+      const blob = file.slice(0, file.size, mime);
+      const natural = await readImageSize(blob);
+      if (!natural.w || !natural.h) throw new Error("Ảnh không có kích thước hợp lệ.");
+
+      const maxW = Math.min(420, page.width * 0.72);
+      const maxH = Math.min(520, page.height * 0.64);
+      const ratio = Math.min(maxW / natural.w, maxH / natural.h, 1);
+      const width = Math.max(12, Math.round(natural.w * ratio));
+      const height = Math.max(12, Math.round(natural.h * ratio));
+      const padding = 16;
+      const x = clamp(
+        anchor.x - width / 2,
+        padding,
+        Math.max(padding, page.width - width - padding),
+      );
+      const y = clamp(
+        anchor.y - height / 2,
+        padding,
+        Math.max(padding, page.height - height - padding),
+      );
+      const assetId = nid();
+
+      await putAsset({
+        id: assetId,
+        kind: "image",
+        mime,
+        name: file.name || `anh-bang-tam-${new Date().toISOString().replaceAll(":", "-")}.png`,
+        byteLength: blob.size,
+        blob,
+        createdAt: Date.now(),
+      });
+
+      const imageId = nid();
+      const imageObject: CanvasObject = {
+        id: imageId,
+        type: "image",
+        x,
+        y,
+        w: width,
+        h: height,
+        rotation: 0,
+        assetId,
+      };
+      const state = useNotesStore.getState();
+      const current = state.objectsByPage[page.id] ?? [];
+      state.commitObjects(page.id, [...current, imageObject], true);
+      state.setTool({ name: "lasso" });
+      setSelected([imageId]);
+      return imageId;
+    },
+    [page.height, page.id, page.width],
+  );
+
+  const openImagePicker = useCallback(
+    (anchor = lastInsertPoint.current) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.multiple = true;
+      input.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+      document.body.appendChild(input);
+
+      const cleanup = () => input.remove();
+      input.addEventListener("cancel", cleanup, { once: true });
+      input.onchange = async () => {
+        const files = Array.from(input.files ?? []);
+        cleanup();
+        if (!files.length) return;
+        try {
+          for (let index = 0; index < files.length; index += 1) {
+            await insertImageFile(files[index]!, {
+              x: anchor.x + index * 18,
+              y: anchor.y + index * 18,
+            });
+          }
+          toast.success(files.length > 1 ? `Đã thêm ${files.length} ảnh` : "Đã thêm ảnh");
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Không thêm được ảnh.");
+        }
+      };
+      input.click();
+    },
+    [insertImageFile],
+  );
 
   const toPage = useCallback(
     (ev: { clientX: number; clientY: number }) => {
@@ -217,6 +363,62 @@ export function PageSurface({
     void redrawStrokes();
   }, [redrawStrokes]);
 
+  useEffect(() => {
+    if (!active) return;
+    const onOpenImagePicker = () => openImagePicker();
+    window.addEventListener(OPEN_IMAGE_PICKER_EVENT, onOpenImagePicker);
+    return () => window.removeEventListener(OPEN_IMAGE_PICKER_EVENT, onOpenImagePicker);
+  }, [active, openImagePicker]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const onPaste = (event: ClipboardEvent) => {
+      const imageFiles = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
+
+      if (imageFiles.length) {
+        event.preventDefault();
+        activatePage();
+        void (async () => {
+          try {
+            for (let index = 0; index < imageFiles.length; index += 1) {
+              await insertImageFile(imageFiles[index]!, {
+                x: lastInsertPoint.current.x + index * 18,
+                y: lastInsertPoint.current.y + index * 18,
+              });
+            }
+            toast.success(
+              imageFiles.length > 1
+                ? `Đã dán ${imageFiles.length} ảnh từ bảng tạm`
+                : "Đã dán ảnh từ bảng tạm",
+            );
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Không dán được ảnh.");
+          }
+        })();
+        return;
+      }
+
+      const typing =
+        event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement;
+      if (typing) return;
+
+      const state = useNotesStore.getState();
+      if (!state.clipboard.length) return;
+      event.preventDefault();
+      const copies = state.clipboard.map((object) => cloneObject(object));
+      const current = state.objectsByPage[page.id] ?? [];
+      state.commitObjects(page.id, [...current, ...copies], true);
+      setSelected(copies.map((copy) => copy.id));
+    };
+
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [activatePage, active, insertImageFile, page.id]);
+
   const setupLive = () => {
     const canvas = liveRef.current;
     if (!canvas) return null;
@@ -245,10 +447,11 @@ export function PageSurface({
   }
 
   function onPointerDown(ev: React.PointerEvent<HTMLCanvasElement>) {
-    if (!active) return;
+    activatePage();
     if (isDrawBlocked(ev.nativeEvent)) return;
     (ev.target as HTMLCanvasElement).setPointerCapture(ev.pointerId);
     const p = toPage(ev);
+    lastInsertPoint.current = p;
     const pressure = ev.pressure > 0 ? ev.pressure : 0.5;
     strokeBeforeState.current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
 
@@ -276,60 +479,7 @@ export function PageSurface({
     }
 
     if (tool.name === "image") {
-      const clickPos = p;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "image/*";
-      input.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
-      document.body.appendChild(input);
-      input.onchange = async () => {
-        document.body.removeChild(input);
-        const file = input.files?.[0];
-        if (!file) return;
-        const buf = await file.arrayBuffer();
-        const blob = new Blob([buf], { type: file.type });
-        // Get natural image dimensions
-        const imgUrl = URL.createObjectURL(blob);
-        const naturalSize = await new Promise<{w:number;h:number}>((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-          img.onerror = () => resolve({ w: 160, h: 120 });
-          img.src = imgUrl;
-        });
-        URL.revokeObjectURL(imgUrl);
-        // Fit image: max 400px wide/tall
-        const maxDim = 400;
-        const ratio = Math.min(maxDim / naturalSize.w, maxDim / naturalSize.h, 1);
-        const iw = Math.round(naturalSize.w * ratio);
-        const ih = Math.round(naturalSize.h * ratio);
-        const id = nid();
-        const { putAsset } = await import("@/lib/notes/db");
-        await putAsset({
-          id,
-          kind: "image",
-          mime: file.type,
-          name: file.name,
-          byteLength: blob.size,
-          blob,
-          createdAt: Date.now(),
-        });
-        const imgId = nid();
-        const imgObj: CanvasObject = {
-          id: imgId,
-          type: "image",
-          x: clickPos.x - iw / 2,
-          y: clickPos.y - ih / 2,
-          w: iw,
-          h: ih,
-          rotation: 0,
-          assetId: id,
-        };
-        const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-        commit([...current, imgObj]);
-        // Auto-select so user can immediately move/resize
-        setSelected([imgId]);
-      };
-      input.click();
+      openImagePicker(p);
       return;
     }
 
@@ -370,7 +520,10 @@ export function PageSurface({
   }
 
   function onPointerMove(ev: React.PointerEvent<HTMLCanvasElement>) {
-    if (!drawing.current) return;
+    if (!drawing.current) {
+      if (active) lastInsertPoint.current = toPage(ev);
+      return;
+    }
     const events = ev.nativeEvent.getCoalescedEvents?.() ?? [ev.nativeEvent];
     for (const e of events) {
       const p = toPage(e);
@@ -436,7 +589,9 @@ export function PageSurface({
     // Eraser: all intermediate moves were non-undoable; commit once here as a single undo step
     if (tool.name === "eraser") {
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-      useNotesStore.getState().commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      useNotesStore
+        .getState()
+        .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
       strokeBeforeState.current = null;
       return;
     }
@@ -444,7 +599,9 @@ export function PageSurface({
     if (drag.current?.kind === "move") {
       drag.current = null;
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-      useNotesStore.getState().commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      useNotesStore
+        .getState()
+        .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
       strokeBeforeState.current = null;
       return;
     }
@@ -460,7 +617,13 @@ export function PageSurface({
       const b = toPage(ev);
       let coords = { x1: shapeA.current.x, y1: shapeA.current.y, x2: b.x, y2: b.y };
       if (ev.shiftKey || tool.shapeSnap) {
-        coords = snapShape(tool.name as "line" | "arrow" | "rect" | "ellipse", coords.x1, coords.y1, coords.x2, coords.y2);
+        coords = snapShape(
+          tool.name as "line" | "arrow" | "rect" | "ellipse",
+          coords.x1,
+          coords.y1,
+          coords.x2,
+          coords.y2,
+        );
       }
       commit([
         ...objects,
@@ -523,52 +686,128 @@ export function PageSurface({
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!active) return;
-      const typing = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
+      const typing =
+        e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
       if (typing) return;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) useNotesStore.getState().redo();
-        else useNotesStore.getState().undo();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        useNotesStore.getState().redo();
-      }
+      const saveObjects = (next: CanvasObject[]) =>
+        useNotesStore.getState().commitObjects(page.id, next, true);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && selected.length) {
-        const objs = objects.filter((o) => selected.includes(o.id)).map((o) => cloneObject(o, 0, 0));
+        const objs = objects
+          .filter((o) => selected.includes(o.id))
+          .map((o) => cloneObject(o, 0, 0));
         useNotesStore.setState({ clipboard: objs });
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x" && selected.length) {
-        const objs = objects.filter((o) => selected.includes(o.id)).map((o) => cloneObject(o, 0, 0));
+        const objs = objects
+          .filter((o) => selected.includes(o.id))
+          .map((o) => cloneObject(o, 0, 0));
         useNotesStore.setState({ clipboard: objs });
-        commit(objects.filter((o) => !selected.includes(o.id)));
+        saveObjects(objects.filter((o) => !selected.includes(o.id)));
         setSelected([]);
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-        const clip = useNotesStore.getState().clipboard;
-        if (!clip.length) return;
-        const copies = clip.map((o) => cloneObject(o));
-        commit([...objects, ...copies]);
-        setSelected(copies.map((c) => c.id));
-      }
       if ((e.key === "Delete" || e.key === "Backspace") && selected.length) {
-        commit(objects.filter((o) => !selected.includes(o.id)));
+        saveObjects(objects.filter((o) => !selected.includes(o.id)));
         setSelected([]);
       }
       if (e.key === "[" && selected.length) {
         const color = useNotesStore.getState().tool.color;
-        commit(objects.map((o) => (selected.includes(o.id) ? recolor(o, color) : o)));
+        saveObjects(objects.map((o) => (selected.includes(o.id) ? recolor(o, color) : o)));
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, objects, selected]);
+  }, [active, objects, page.id, selected]);
+
+  useEffect(
+    () => () => {
+      resizeCleanup.current?.();
+    },
+    [],
+  );
+
+  function updateResize(pointerId: number, clientX: number, clientY: number) {
+    const session = resize.current;
+    if (!session || session.pointerId !== pointerId) return;
+
+    const dx = (clientX - session.startX) / zoom;
+    const dy = (clientY - session.startY) / zoom;
+    const relativeX = dx / Math.max(1, session.box.w);
+    const relativeY = dy / Math.max(1, session.box.h);
+    const factor = clamp(
+      1 + (Math.abs(relativeX) >= Math.abs(relativeY) ? relativeX : relativeY),
+      0.15,
+      8,
+    );
+    const originals = new Map(session.originals.map((object) => [object.id, object]));
+    const state = useNotesStore.getState();
+    const current = state.objectsByPage[page.id] ?? [];
+    useNotesStore.setState({
+      objectsByPage: {
+        ...state.objectsByPage,
+        [page.id]: current.map((object) => {
+          const original = originals.get(object.id);
+          return original ? scaleObjectFromTopLeft(original, session.box, factor) : object;
+        }),
+      },
+    });
+  }
+
+  function finishResize(pointerId: number) {
+    const session = resize.current;
+    if (!session || session.pointerId !== pointerId) return;
+    resizeCleanup.current?.();
+    resizeCleanup.current = null;
+    resize.current = null;
+    const state = useNotesStore.getState();
+    state.commitObjects(page.id, state.objectsByPage[page.id] ?? [], true, session.before);
+  }
+
+  function onDragOver(event: React.DragEvent<HTMLDivElement>) {
+    const hasFiles = Array.from(event.dataTransfer.items).some((item) => item.kind === "file");
+    if (!hasFiles) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDropActive(true);
+  }
+
+  function onDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
+    activatePage();
+    const anchor = toPage(event);
+    lastInsertPoint.current = anchor;
+    const files = Array.from(event.dataTransfer.files).filter(isImageFile);
+    if (!files.length) {
+      toast.error("Hãy thả một tệp ảnh vào trang.");
+      return;
+    }
+    void (async () => {
+      try {
+        for (let index = 0; index < files.length; index += 1) {
+          await insertImageFile(files[index]!, {
+            x: anchor.x + index * 18,
+            y: anchor.y + index * 18,
+          });
+        }
+        toast.success(files.length > 1 ? `Đã thêm ${files.length} ảnh` : "Đã thêm ảnh");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Không thêm được ảnh.");
+      }
+    })();
+  }
 
   return (
     <div
       ref={wrapRef}
       className="page-shadow relative bg-paper"
       style={{ width: cssW, height: cssH }}
+      onDragEnter={onDragOver}
+      onDragOver={onDragOver}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+      }}
+      onDrop={onDrop}
     >
       <canvas ref={baseRef} className="pointer-events-none absolute top-0 left-0" />
       <canvas ref={staticRef} className="pointer-events-none absolute top-0 left-0" />
@@ -581,10 +820,71 @@ export function PageSurface({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       />
+      {dropActive ? (
+        <div className="pointer-events-none absolute inset-3 z-40 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-surface-2/90 text-accent">
+          <div className="flex flex-col items-center gap-2 px-6 text-center">
+            <span className="grid size-12 place-items-center rounded-full bg-accent-soft">
+              <ImagePlus className="size-5" />
+            </span>
+            <p className="text-sm font-semibold">Thả ảnh vào đây</p>
+            <p className="text-xs text-muted">Ảnh sẽ được đặt đúng tại vị trí con trỏ</p>
+          </div>
+        </div>
+      ) : null}
+      {selectionBounds && selected.length && page.rotation === 0 ? (
+        <div
+          className="pointer-events-none absolute z-20 border border-accent"
+          style={{
+            left: selectionBounds.x * zoom,
+            top: selectionBounds.y * zoom,
+            width: Math.max(1, selectionBounds.w * zoom),
+            height: Math.max(1, selectionBounds.h * zoom),
+          }}
+        >
+          <button
+            type="button"
+            className="pointer-events-auto absolute -right-3 -bottom-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none"
+            aria-label="Kéo để đổi kích thước"
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              resize.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                box: selectionBounds,
+                originals: selectedObjects,
+                before: useNotesStore.getState().objectsByPage[page.id] ?? objects,
+              };
+              const onMove = (moveEvent: PointerEvent) => {
+                moveEvent.preventDefault();
+                updateResize(moveEvent.pointerId, moveEvent.clientX, moveEvent.clientY);
+              };
+              const onUp = (upEvent: PointerEvent) => {
+                upEvent.preventDefault();
+                finishResize(upEvent.pointerId);
+              };
+              window.addEventListener("pointermove", onMove, { passive: false });
+              window.addEventListener("pointerup", onUp, { passive: false });
+              window.addEventListener("pointercancel", onUp, { passive: false });
+              resizeCleanup.current = () => {
+                window.removeEventListener("pointermove", onMove);
+                window.removeEventListener("pointerup", onUp);
+                window.removeEventListener("pointercancel", onUp);
+              };
+            }}
+          >
+            <MoveDiagonal2 className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
       {editing ? (
         <textarea
           autoFocus
-          className="absolute resize-none border-2 border-accent bg-surface-2/95 p-1.5 text-fg outline-none shadow-lg"
+          rows={2}
+          placeholder="Nhập nội dung…"
+          className="absolute resize overflow-auto rounded-md border-2 border-accent bg-surface-2/95 p-2 text-fg outline-none shadow-lg"
           style={{
             left: editing.x * zoom,
             top: editing.y * zoom,
@@ -597,15 +897,29 @@ export function PageSurface({
             lineHeight: 1.4,
           }}
           defaultValue={editing.text}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
           onBlur={(e) => {
-            const text = e.target.value.trim();
+            const text = e.target.value.trimEnd();
+            const nextText = {
+              ...editing,
+              text,
+              w: Math.max(120, e.currentTarget.offsetWidth / zoom),
+              h: Math.max(editing.fontSize * 1.5, e.currentTarget.scrollHeight / zoom),
+            };
             const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
             const exists = current.some((o) => o.id === editing.id);
-            if (text) {
+            if (text.trim()) {
               if (exists) {
-                commit(current.map((o) => o.id === editing.id && o.type === "text" ? { ...o, text } : o));
+                commit(
+                  current.map((o) => (o.id === editing.id && o.type === "text" ? nextText : o)),
+                );
               } else {
-                commit([...current, { ...editing, text }]);
+                commit([...current, nextText]);
               }
             } else if (exists) {
               // Remove empty text objects when cleared
@@ -617,16 +931,14 @@ export function PageSurface({
       ) : null}
       {selectionBounds && selected.length ? (
         <div
-          className="selection-toolbar absolute z-30 flex items-center gap-0.5 rounded-lg bg-surface-2 p-1 text-fg"
+          className="selection-toolbar absolute z-30 flex items-center gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-1 text-fg"
           style={{
-            left: Math.min(
-              Math.max(8, selectionBounds.x * zoom),
-              Math.max(8, cssW - 326),
-            ),
+            left: Math.min(Math.max(8, selectionBounds.x * zoom), Math.max(8, cssW - 326)),
             top:
               selectionBounds.y * zoom > 54
                 ? selectionBounds.y * zoom - 48
                 : Math.min(cssH - 46, (selectionBounds.y + selectionBounds.h) * zoom + 8),
+            maxWidth: Math.max(180, cssW - 16),
           }}
           onPointerDown={(event) => event.stopPropagation()}
           aria-label="Thao tác vùng chọn"
@@ -637,7 +949,9 @@ export function PageSurface({
             className="size-8"
             aria-label="Sao chép"
             onClick={() =>
-              useNotesStore.setState({ clipboard: selectedObjects.map((object) => cloneObject(object, 0, 0)) })
+              useNotesStore.setState({
+                clipboard: selectedObjects.map((object) => cloneObject(object, 0, 0)),
+              })
             }
           >
             <Copy className="size-4" />
@@ -648,7 +962,9 @@ export function PageSurface({
             className="size-8"
             aria-label="Nhân bản"
             onClick={() => {
-              const copies = selectedObjects.map((object) => cloneObject(object, 12 / zoom, 12 / zoom));
+              const copies = selectedObjects.map((object) =>
+                cloneObject(object, 12 / zoom, 12 / zoom),
+              );
               commit([...objects, ...copies]);
               setSelected(copies.map((object) => object.id));
             }}
@@ -678,6 +994,50 @@ export function PageSurface({
           >
             <Plus className="size-4" />
           </Button>
+          {onlyTextSelected && selectedTextSize !== null ? (
+            <>
+              <span className="mx-1 h-5 w-px bg-border" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Giảm cỡ chữ"
+                onClick={() =>
+                  transformSelection((object) =>
+                    object.type === "text"
+                      ? {
+                          ...object,
+                          fontSize: clamp(object.fontSize - 2, 8, 96),
+                          h: Math.max(20, object.h - 2.7),
+                        }
+                      : object,
+                  )
+                }
+              >
+                <span className="text-xs font-semibold">A−</span>
+              </Button>
+              <span className="min-w-8 text-center text-xs tabular-nums">{selectedTextSize}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Tăng cỡ chữ"
+                onClick={() =>
+                  transformSelection((object) =>
+                    object.type === "text"
+                      ? {
+                          ...object,
+                          fontSize: clamp(object.fontSize + 2, 8, 96),
+                          h: object.h + 2.7,
+                        }
+                      : object,
+                  )
+                }
+              >
+                <span className="text-xs font-semibold">A+</span>
+              </Button>
+            </>
+          ) : null}
           <Button
             variant="ghost"
             size="icon"
@@ -733,20 +1093,34 @@ function scalePoint(x: number, y: number, cx: number, cy: number, factor: number
   return { x: cx + (x - cx) * factor, y: cy + (y - cy) * factor };
 }
 
-function scaleObject(object: CanvasObject, box: { x: number; y: number; w: number; h: number }, factor: number): CanvasObject {
+function scaleObject(
+  object: CanvasObject,
+  box: { x: number; y: number; w: number; h: number },
+  factor: number,
+): CanvasObject {
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   if (object.type === "stroke") {
     return {
       ...object,
       width: Math.max(0.35, object.width * factor),
-      points: object.points.map((point) => ({ ...point, ...scalePoint(point.x, point.y, cx, cy, factor) })),
+      points: object.points.map((point) => ({
+        ...point,
+        ...scalePoint(point.x, point.y, cx, cy, factor),
+      })),
     };
   }
   if (object.type === "shape") {
     const a = scalePoint(object.x1, object.y1, cx, cy, factor);
     const b = scalePoint(object.x2, object.y2, cx, cy, factor);
-    return { ...object, x1: a.x, y1: a.y, x2: b.x, y2: b.y, width: Math.max(0.35, object.width * factor) };
+    return {
+      ...object,
+      x1: a.x,
+      y1: a.y,
+      x2: b.x,
+      y2: b.y,
+      width: Math.max(0.35, object.width * factor),
+    };
   }
   const position = scalePoint(object.x, object.y, cx, cy, factor);
   return {
@@ -759,7 +1133,52 @@ function scaleObject(object: CanvasObject, box: { x: number; y: number; w: numbe
   };
 }
 
-function rotateObject(object: CanvasObject, box: { x: number; y: number; w: number; h: number }, degrees: number): CanvasObject {
+function scaleObjectFromTopLeft(
+  object: CanvasObject,
+  box: { x: number; y: number; w: number; h: number },
+  factor: number,
+): CanvasObject {
+  const scale = (x: number, y: number) => ({
+    x: box.x + (x - box.x) * factor,
+    y: box.y + (y - box.y) * factor,
+  });
+
+  if (object.type === "stroke") {
+    return {
+      ...object,
+      width: Math.max(0.35, object.width * factor),
+      points: object.points.map((point) => ({ ...point, ...scale(point.x, point.y) })),
+    };
+  }
+  if (object.type === "shape") {
+    const start = scale(object.x1, object.y1);
+    const end = scale(object.x2, object.y2);
+    return {
+      ...object,
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+      width: Math.max(0.35, object.width * factor),
+    };
+  }
+
+  const position = scale(object.x, object.y);
+  return {
+    ...object,
+    x: position.x,
+    y: position.y,
+    w: Math.max(12, object.w * factor),
+    h: Math.max(12, object.h * factor),
+    ...(object.type === "text" ? { fontSize: Math.max(8, object.fontSize * factor) } : {}),
+  };
+}
+
+function rotateObject(
+  object: CanvasObject,
+  box: { x: number; y: number; w: number; h: number },
+  degrees: number,
+): CanvasObject {
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   const angle = (degrees * Math.PI) / 180;
@@ -768,7 +1187,10 @@ function rotateObject(object: CanvasObject, box: { x: number; y: number; w: numb
     y: cy + (x - cx) * Math.sin(angle) + (y - cy) * Math.cos(angle),
   });
   if (object.type === "stroke") {
-    return { ...object, points: object.points.map((point) => ({ ...point, ...rotatePoint(point.x, point.y) })) };
+    return {
+      ...object,
+      points: object.points.map((point) => ({ ...point, ...rotatePoint(point.x, point.y) })),
+    };
   }
   if (object.type === "shape") {
     const a = rotatePoint(object.x1, object.y1);

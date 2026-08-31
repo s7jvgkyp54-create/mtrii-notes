@@ -18,10 +18,12 @@ import {
   Undo2,
   Hand,
   ArrowUpRight,
+  ClipboardPaste,
   FileDown,
   Search,
   PanelLeft,
   MoreHorizontal,
+  Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,7 +46,7 @@ import { displaySize } from "@/lib/notes/geometry";
 import { searchPdfText, loadPdfDocument } from "@/lib/notes/pdf";
 import { getAsset } from "@/lib/notes/db";
 import { useNotesNavigate } from "@/lib/notes/navigation";
-import { PageSurface } from "./page-surface";
+import { OPEN_IMAGE_PICKER_EVENT, PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
 import { NotesMark } from "./logo";
 
@@ -61,7 +63,6 @@ export function EditorView({ notebookId }: { notebookId: string }) {
   const pages = useNotesStore((s) => s.pages);
   const zoom = useNotesStore((s) => s.zoom);
   const pageIndex = useNotesStore((s) => s.currentPageIndex);
-  const tool = useNotesStore((s) => s.tool);
   const saveStatus = useNotesStore((s) => s.saveStatus);
   const saveError = useNotesStore((s) => s.saveError);
   const tabs = useNotesStore((s) => s.settings.openTabIds);
@@ -72,6 +73,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
   const [search, setSearch] = useState("");
   const [dragPageIndex, setDragPageIndex] = useState<number | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const mobileFitNotebook = useRef<string | null>(null);
   const ready = useNotesStore((s) => s.activeNotebookId === notebookId && pages.length > 0);
 
   useEffect(() => {
@@ -82,14 +84,15 @@ export function EditorView({ notebookId }: { notebookId: string }) {
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) {
           useNotesStore.getState().redo();
         } else {
           useNotesStore.getState().undo();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         useNotesStore.getState().redo();
       }
@@ -111,6 +114,23 @@ export function EditorView({ notebookId }: { notebookId: string }) {
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
+
+  useEffect(() => {
+    if (!ready || mobileFitNotebook.current === notebookId) return;
+    if (!window.matchMedia("(max-width: 767px)").matches) return;
+    mobileFitNotebook.current = notebookId;
+    setSideOpen(false);
+
+    const frame = window.requestAnimationFrame(() => {
+      const page = useNotesStore.getState().pages[useNotesStore.getState().currentPageIndex];
+      const stage = stageRef.current;
+      if (!page || !stage) return;
+      const { w } = displaySize(page);
+      const availableWidth = Math.max(stage.clientWidth, window.innerWidth) - 24;
+      useNotesStore.getState().setZoom(Math.min(1, availableWidth / w));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [notebookId, ready]);
 
   const handleCloseTab = (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -167,9 +187,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
                   }}
                   className={cn(
                     "group flex max-w-48 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium cursor-pointer transition-colors select-none",
-                    on
-                      ? "bg-accent-soft text-accent"
-                      : "text-muted hover:bg-overlay hover:text-fg",
+                    on ? "bg-accent-soft text-accent" : "text-muted hover:bg-overlay hover:text-fg",
                   )}
                 >
                   <span className="truncate">{n.name}</span>
@@ -178,7 +196,9 @@ export function EditorView({ notebookId }: { notebookId: string }) {
                     onClick={(e) => handleCloseTab(id, e)}
                     className={cn(
                       "flex size-4 items-center justify-center rounded-sm transition-opacity hover:bg-black/15 dark:hover:bg-white/15 hover:text-destructive",
-                      on ? "opacity-70 hover:opacity-100" : "opacity-0 group-hover:opacity-70 hover:opacity-100",
+                      on
+                        ? "opacity-70 hover:opacity-100"
+                        : "opacity-0 group-hover:opacity-70 hover:opacity-100",
                     )}
                     title="Đóng tệp này"
                   >
@@ -219,12 +239,22 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             >
               <FileDown className="size-4" /> Xuất PDF (gộp ghi chú)
             </MenuItem>
-            <MenuItem onSelect={() => void useNotesStore.getState().exportBackup("notebook", notebookId)}>
+            <MenuItem
+              onSelect={() => void useNotesStore.getState().exportBackup("notebook", notebookId)}
+            >
               Xuất bản sao sổ (.notesbackup)
             </MenuItem>
             <MenuSep />
-            <MenuItem onSelect={() => useNotesStore.getState().persistSettings({ penOnly: !useNotesStore.getState().settings.penOnly })}>
-              {useNotesStore.getState().settings.penOnly ? "Tắt chế độ chỉ bút" : "Chỉ viết bằng bút"}
+            <MenuItem
+              onSelect={() =>
+                useNotesStore
+                  .getState()
+                  .persistSettings({ penOnly: !useNotesStore.getState().settings.penOnly })
+              }
+            >
+              {useNotesStore.getState().settings.penOnly
+                ? "Tắt chế độ chỉ bút"
+                : "Chỉ viết bằng bút"}
             </MenuItem>
           </DropdownMenu>
         </header>
@@ -285,7 +315,9 @@ export function EditorView({ notebookId }: { notebookId: string }) {
                       type="button"
                       onClick={() => {
                         useNotesStore.getState().setPageIndex(i);
-                        document.getElementById(`page-${p.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        document
+                          .getElementById(`page-${p.id}`)
+                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
                       }}
                       className="block w-full text-left"
                       aria-current={i === pageIndex ? "page" : undefined}
@@ -302,7 +334,11 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               {sideTab === "marks" && <BookmarkList />}
             </div>
             <div className="flex gap-1 border-t border-border p-2">
-              <Button size="sm" variant="ghost" onClick={() => void useNotesStore.getState().addPage(pageIndex)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void useNotesStore.getState().addPage(pageIndex)}
+              >
                 <Plus className="size-3.5" /> Trang
               </Button>
             </div>
@@ -326,7 +362,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               <div className="mx-auto flex flex-col items-center gap-6 py-8">
                 {visiblePages.map((p) => (
                   <div key={p.id} id={`page-${p.id}`} className="flex flex-col items-center gap-2">
-                    <PageSurface page={p} zoom={zoom} active={pages[pageIndex]?.id === p.id || pageMode === "continuous"} />
+                    <PageSurface page={p} zoom={zoom} active={pages[pageIndex]?.id === p.id} />
                     <p className="text-xs tabular-nums text-muted">
                       {p.index + 1} / {pages.length}
                     </p>
@@ -338,11 +374,21 @@ export function EditorView({ notebookId }: { notebookId: string }) {
         </div>
 
         <footer className="flex flex-wrap items-center gap-2 border-t border-border bg-surface px-3 py-1.5 pb-16 text-xs md:pb-1.5">
-          <Button variant="ghost" size="sm" onClick={() => useNotesStore.getState().setZoom(zoom / 1.1)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Thu nhỏ trang"
+            onClick={() => useNotesStore.getState().setZoom(zoom / 1.1)}
+          >
             <Minus className="size-3.5" />
           </Button>
           <span className="w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-          <Button variant="ghost" size="sm" onClick={() => useNotesStore.getState().setZoom(zoom * 1.1)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Phóng to trang"
+            onClick={() => useNotesStore.getState().setZoom(zoom * 1.1)}
+          >
             <Plus className="size-3.5" />
           </Button>
           <Button
@@ -365,7 +411,10 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               const p = pages[pageIndex];
               if (!p || !stageRef.current) return;
               const { w, h } = displaySize(p);
-              const z = Math.min((stageRef.current.clientWidth - 48) / w, (stageRef.current.clientHeight - 48) / h);
+              const z = Math.min(
+                (stageRef.current.clientWidth - 48) / w,
+                (stageRef.current.clientHeight - 48) / h,
+              );
               useNotesStore.getState().setZoom(z);
             }}
           >
@@ -411,24 +460,39 @@ function Toolbar() {
       <ToolBtn id="hand" label="Di chuyển" icon={Hand} />
       <span className="mx-1 h-6 w-px bg-border" />
       {PENS.map((p) => (
-        <PenBtn key={p.id} id={p.id} label={p.label} icon={p.id === "highlighter" ? Highlighter : p.icon} />
+        <PenBtn
+          key={p.id}
+          id={p.id}
+          label={p.label}
+          icon={p.id === "highlighter" ? Highlighter : p.icon}
+        />
       ))}
       <EraserBtn />
       <span className="mx-1 h-6 w-px bg-border" />
-      <ToolBtn id="text" label="Chữ" icon={Type} />
-      <ToolBtn id="image" label="Ảnh" icon={ImagePlus} />
+      <TextBtn />
+      <ImageBtn />
       <ToolBtn id="line" label="Đường thẳng" icon={Minus} />
       <ToolBtn id="arrow" label="Mũi tên" icon={ArrowUpRight} />
       <ToolBtn id="rect" label="Hình chữ nhật" icon={Square} />
       <ToolBtn id="ellipse" label="Hình tròn" icon={Circle} />
       <span className="mx-1 h-6 w-px bg-border" />
       <Tooltip content="Hoàn tác (Ctrl+Z)">
-        <Button variant="ghost" size="icon" onClick={() => useNotesStore.getState().undo()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Hoàn tác"
+          onClick={() => useNotesStore.getState().undo()}
+        >
           <Undo2 />
         </Button>
       </Tooltip>
       <Tooltip content="Làm lại">
-        <Button variant="ghost" size="icon" onClick={() => useNotesStore.getState().redo()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Làm lại"
+          onClick={() => useNotesStore.getState().redo()}
+        >
           <Redo2 />
         </Button>
       </Tooltip>
@@ -436,6 +500,7 @@ function Toolbar() {
         <Button
           variant="ghost"
           size="icon"
+          aria-label="Xoay trang"
           onClick={() => {
             const pages = useNotesStore.getState().pages;
             const i = useNotesStore.getState().currentPageIndex;
@@ -524,12 +589,137 @@ function ToolBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon:
         variant="ghost"
         size="icon"
         className={cn(active && "tool-active")}
+        aria-label={label}
         aria-pressed={active}
         onClick={() => useNotesStore.getState().setTool({ name: id })}
       >
         <Icon />
       </Button>
     </Tooltip>
+  );
+}
+
+function TextBtn() {
+  const active = useNotesStore((s) => s.tool.name === "text");
+  const fontSize = useNotesStore((s) => s.tool.fontSize);
+  const sizes = [14, 18, 22, 28, 36, 48];
+
+  return (
+    <Popover
+      align="start"
+      trigger={
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("w-auto min-w-14 gap-1.5 px-2", active && "tool-active")}
+          aria-label={`Chữ, cỡ ${fontSize}`}
+          aria-pressed={active}
+          onClick={() => useNotesStore.getState().setTool({ name: "text" })}
+        >
+          <Type />
+          <span className="text-xs tabular-nums">{Math.round(fontSize)}</span>
+        </Button>
+      }
+    >
+      <div className="w-64">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">Cỡ chữ</p>
+            <p className="text-xs text-muted">Áp dụng cho chữ thêm tiếp theo</p>
+          </div>
+          <span className="rounded-md bg-accent-soft px-2 py-1 text-sm font-semibold text-accent tabular-nums">
+            {Math.round(fontSize)} pt
+          </span>
+        </div>
+        <div className="mb-4 grid grid-cols-3 gap-1.5">
+          {sizes.map((size) => (
+            <button
+              key={size}
+              type="button"
+              className={cn(
+                "h-10 rounded-md text-sm font-medium transition-colors",
+                Math.round(fontSize) === size
+                  ? "bg-accent text-accent-fg"
+                  : "bg-overlay text-fg hover:bg-border",
+              )}
+              onClick={() => useNotesStore.getState().setTool({ name: "text", fontSize: size })}
+            >
+              {size}
+            </button>
+          ))}
+        </div>
+        <Slider
+          min={10}
+          max={72}
+          step={1}
+          value={fontSize}
+          onValueChange={(value) =>
+            useNotesStore.getState().setTool({ name: "text", fontSize: value })
+          }
+        />
+        <p className="mt-3 truncate text-muted" style={{ fontSize: Math.min(fontSize, 30) }}>
+          Chữ mẫu rõ ràng
+        </p>
+      </div>
+    </Popover>
+  );
+}
+
+function ImageBtn() {
+  const active = useNotesStore((s) => s.tool.name === "image");
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover
+      align="start"
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(active && "tool-active")}
+          aria-label="Thêm ảnh"
+          aria-pressed={active}
+          onClick={() => useNotesStore.getState().setTool({ name: "image" })}
+        >
+          <ImagePlus />
+        </Button>
+      }
+    >
+      <div className="w-64">
+        <p className="mb-1 text-sm font-semibold">Thêm ảnh</p>
+        <p className="mb-3 text-xs leading-relaxed text-muted">
+          Ảnh được lưu ngay trong sổ và chọn sẵn để bạn di chuyển hoặc đổi kích thước.
+        </p>
+        <Button
+          className="w-full justify-start"
+          onClick={() => {
+            setOpen(false);
+            window.dispatchEvent(new Event(OPEN_IMAGE_PICKER_EVENT));
+          }}
+        >
+          <Upload /> Chọn ảnh từ máy
+        </Button>
+        <div className="mt-3 flex gap-2 rounded-lg bg-overlay p-2.5">
+          <ClipboardPaste className="mt-0.5 size-4 shrink-0 text-accent" />
+          <p className="text-xs leading-relaxed text-muted">
+            Ảnh chụp đang ở bảng tạm? Nhấn <strong className="text-fg">Ctrl+V</strong> để dán thẳng
+            vào trang.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="mt-2 min-h-10 w-full rounded-md px-2 text-left text-xs text-muted hover:bg-overlay hover:text-fg"
+          onClick={() => {
+            useNotesStore.getState().setTool({ name: "image" });
+            setOpen(false);
+          }}
+        >
+          Hoặc bấm vào vị trí trên trang để chọn ảnh
+        </button>
+      </div>
+    </Popover>
   );
 }
 
@@ -562,12 +752,17 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
             key={c}
             type="button"
             aria-label={c}
-            className={cn("size-7 rounded-full border-2", color === c ? "border-fg" : "border-transparent")}
+            className={cn(
+              "size-7 rounded-full border-2",
+              color === c ? "border-fg" : "border-transparent",
+            )}
             style={{ background: c }}
             onClick={() =>
-              useNotesStore.getState().setTool(
-                id === "highlighter" ? { name: id, highlighterColor: c } : { name: id, color: c },
-              )
+              useNotesStore
+                .getState()
+                .setTool(
+                  id === "highlighter" ? { name: id, highlighterColor: c } : { name: id, color: c },
+                )
             }
           />
         ))}
@@ -579,7 +774,9 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
         step={0.2}
         value={width}
         onValueChange={(v) =>
-          useNotesStore.getState().setTool(id === "highlighter" ? { highlighterWidth: v } : { width: v })
+          useNotesStore
+            .getState()
+            .setTool(id === "highlighter" ? { highlighterWidth: v } : { width: v })
         }
       />
     </Popover>
@@ -616,7 +813,10 @@ function EraserBtn() {
         <button
           key={id}
           type="button"
-          className={cn("mb-1 block w-full rounded-md px-2 py-1.5 text-left text-xs", mode === id && "bg-accent-soft")}
+          className={cn(
+            "mb-1 block w-full rounded-md px-2 py-1.5 text-left text-xs",
+            mode === id && "bg-accent-soft",
+          )}
           onClick={() => useNotesStore.getState().setTool({ name: "eraser", eraserMode: id })}
         >
           {label}

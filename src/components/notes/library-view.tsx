@@ -92,25 +92,27 @@ export function LibraryView() {
       ? folderId
         ? (currentFolder?.name ?? "Thư mục")
         : "Tất cả tài liệu"
-      : NAV.find((n) => n.id === section)?.label ?? "";
+      : (NAV.find((n) => n.id === section)?.label ?? "");
 
   async function openNb(id: string) {
     await useNotesStore.getState().openNotebook(id);
     await navigate({ to: "/notebook/$id", params: { id } });
   }
 
-  
   async function onDriveImport(driveFile: { id: string; name: string; mimeType: string }) {
     setDriveOpen(false);
     const id = toast.loading("Đang tải file từ Google Drive...");
     try {
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFile.id}?alt=media`, {
-        headers: { Authorization: `Bearer ${settings.googleDriveAccessToken}` }
-      });
+      const res = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${driveFile.id}?alt=media`,
+        {
+          headers: { Authorization: `Bearer ${settings.googleDriveAccessToken}` },
+        },
+      );
       if (!res.ok) throw new Error("Lỗi tải file");
       const blob = await res.blob();
       const file = new File([blob], driveFile.name, { type: driveFile.mimeType });
-      
+
       const nbId = await useNotesStore.getState().importPdf(file);
       toast.success(`Đã nhập ${file.name}`, { id });
       await openNb(nbId);
@@ -182,7 +184,9 @@ export function LibraryView() {
               </button>
             );
           })}
-          <p className="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-subtle uppercase">Thư mục</p>
+          <p className="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-subtle uppercase">
+            Thư mục
+          </p>
           {folders
             .filter((f) => !f.deletedAt)
             .map((f) => (
@@ -376,6 +380,7 @@ export function LibraryView() {
               onCreate={() => setCreateOpen(true)}
               onNewFolder={() => setFolderOpen(true)}
               onImport={() => fileRef.current?.click()}
+              onImportDrive={() => setDriveOpen(true)}
               section={section}
               isFolder={Boolean(folderId)}
             />
@@ -450,7 +455,11 @@ export function LibraryView() {
                               {selectedIds.includes(nb.id) ? <Check className="size-4" /> : null}
                             </button>
                           ) : (
-                            <button type="button" className="w-10 shrink-0 cursor-pointer" onClick={() => void openNb(nb.id)}>
+                            <button
+                              type="button"
+                              className="w-10 shrink-0 cursor-pointer"
+                              onClick={() => void openNb(nb.id)}
+                            >
                               <NotebookCover notebook={nb} />
                             </button>
                           )}
@@ -482,7 +491,9 @@ export function LibraryView() {
 
       {dragging ? (
         <div className="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-accent/20">
-          <p className="rounded-xl bg-surface-2 px-6 py-4 text-sm font-medium shadow-md">Thả PDF để nhập vào thư mục</p>
+          <p className="rounded-xl bg-surface-2 px-6 py-4 text-sm font-medium shadow-md">
+            Thả PDF để nhập vào thư mục
+          </p>
         </div>
       ) : null}
 
@@ -504,8 +515,16 @@ export function LibraryView() {
             .then((id) => openNb(id));
         }}
       />
-      <Dialog open={folderOpen} onOpenChange={setFolderOpen} title={folderId ? "Thư mục con mới" : "Thư mục mới"}>
-        <Input value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder="Tên thư mục..." />
+      <Dialog
+        open={folderOpen}
+        onOpenChange={setFolderOpen}
+        title={folderId ? "Thư mục con mới" : "Thư mục mới"}
+      >
+        <Input
+          value={folderName}
+          onChange={(e) => setFolderName(e.target.value)}
+          placeholder="Tên thư mục..."
+        />
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setFolderOpen(false)}>
             Hủy
@@ -525,8 +544,8 @@ export function LibraryView() {
       {/* Empty Trash Dialog */}
       <Dialog open={emptyTrashOpen} onOpenChange={setEmptyTrashOpen} title="Dọn sạch thùng rác">
         <p className="text-sm text-muted">
-          Bạn có chắc chắn muốn xóa vĩnh viễn tất cả <strong>{items.length}</strong> sổ tay trong thùng rác không?
-          Thao tác này sẽ giải phóng dung lượng và không thể khôi phục lại.
+          Bạn có chắc chắn muốn xóa vĩnh viễn tất cả <strong>{items.length}</strong> sổ tay trong
+          thùng rác không? Thao tác này sẽ giải phóng dung lượng và không thể khôi phục lại.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setEmptyTrashOpen(false)}>
@@ -555,8 +574,8 @@ export function LibraryView() {
           title="Tài liệu trong Thùng rác"
         >
           <p className="text-sm text-muted">
-            Sổ tay <strong>{trashModalNb.name}</strong> hiện đang nằm trong Thùng rác.
-            Bạn muốn khôi phục sổ này để tiếp tục ghi chép hay xóa vĩnh viễn khỏi máy tính?
+            Sổ tay <strong>{trashModalNb.name}</strong> hiện đang nằm trong Thùng rác. Bạn muốn khôi
+            phục sổ này để tiếp tục ghi chép hay xóa vĩnh viễn khỏi máy tính?
           </p>
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             <Button variant="ghost" onClick={() => setTrashModalNb(null)}>
@@ -669,7 +688,12 @@ function FolderMenu({ folder }: { folder: Folder }) {
     <>
       <DropdownMenu
         trigger={
-          <Button variant="ghost" size="icon" className="size-7 bg-surface-2/90" aria-label="Tùy chọn thư mục">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 bg-surface-2/90"
+            aria-label="Tùy chọn thư mục"
+          >
             <MoreHorizontal className="size-3.5" />
           </Button>
         }
@@ -698,9 +722,14 @@ function FolderMenu({ folder }: { folder: Folder }) {
         </div>
       </Dialog>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen} title={`Xóa thư mục "${folder.name}"?`}>
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title={`Xóa thư mục "${folder.name}"?`}
+      >
         <p className="text-sm text-muted">
-          Bạn có chắc chắn muốn xóa thư mục này không? Các sổ tay bên trong sẽ được chuyển ra ngoài màn hình chính (không bị mất dữ liệu).
+          Bạn có chắc chắn muốn xóa thư mục này không? Các sổ tay bên trong sẽ được chuyển ra ngoài
+          màn hình chính (không bị mất dữ liệu).
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setDeleteOpen(false)}>
@@ -726,18 +755,19 @@ function EmptyLibrary({
   onCreate,
   onNewFolder,
   onImport,
+  onImportDrive,
   section,
   isFolder,
 }: {
   onCreate: () => void;
   onNewFolder: () => void;
   onImport: () => void;
+  onImportDrive: () => void;
   section: LibrarySection;
   isFolder: boolean;
 }) {
   let title = "Chưa có tài liệu nào";
   let desc = "Tạo thư mục để phân loại hoặc tạo sổ mới ngay để bắt đầu viết.";
-  let Icon = NotesMark;
 
   if (isFolder) {
     title = "Thư mục này đang trống";
@@ -771,7 +801,7 @@ function EmptyLibrary({
           <Button variant="outline" size="sm" onClick={onImport}>
             <FileUp className="size-4" /> Nhập PDF
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setDriveOpen(true)}>
+          <Button variant="outline" size="sm" onClick={onImportDrive}>
             <Cloud className="size-4" /> Nhập Drive
           </Button>
         </div>
@@ -794,10 +824,17 @@ function NotebookTile({
   return (
     <article className="group relative">
       <button type="button" onClick={onOpen} className="block w-full text-left cursor-pointer">
-        <div className={cn("rounded-lg transition-transform group-hover:scale-[1.02]", selected && "ring-2 ring-accent ring-offset-2 ring-offset-bg")}>
+        <div
+          className={cn(
+            "rounded-lg transition-transform group-hover:scale-[1.02]",
+            selected && "ring-2 ring-accent ring-offset-2 ring-offset-bg",
+          )}
+        >
           <NotebookCover notebook={notebook} />
         </div>
-        <h3 className="mt-2 truncate text-sm font-medium text-fg group-hover:text-accent transition-colors">{notebook.name}</h3>
+        <h3 className="mt-2 truncate text-sm font-medium text-fg group-hover:text-accent transition-colors">
+          {notebook.name}
+        </h3>
         <p className="text-xs text-muted">
           {notebook.pageCount} trang · {relativeVi(notebook.updatedAt)}
         </p>
@@ -869,7 +906,8 @@ function SelectionBar({
               const notebooks = useNotesStore.getState().notebooks;
               for (const id of selectedIds) {
                 const notebook = notebooks.find((item) => item.id === id);
-                if (notebook && !notebook.favorite) void useNotesStore.getState().toggleFavorite(id);
+                if (notebook && !notebook.favorite)
+                  void useNotesStore.getState().toggleFavorite(id);
               }
               useNotesStore.getState().setSelecting(false);
             }}
@@ -903,7 +941,12 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
     <>
       <DropdownMenu
         trigger={
-          <Button variant="icon" size="icon" className="size-8 bg-surface-2/80 shadow-sm" aria-label="Tùy chọn sổ">
+          <Button
+            variant="icon"
+            size="icon"
+            className="size-8 bg-surface-2/80 shadow-sm"
+            aria-label="Tùy chọn sổ"
+          >
             <MoreHorizontal className="size-4" />
           </Button>
         }
@@ -923,7 +966,9 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
               {notebook.favorite ? "Bỏ yêu thích" : "Yêu thích"}
             </MenuItem>
             <MenuItem onSelect={() => void s.exportPdf(notebook.id)}>Xuất PDF</MenuItem>
-            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id)}>Xuất bản sao sổ</MenuItem>
+            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id)}>
+              Xuất bản sao sổ
+            </MenuItem>
             <MenuSep />
             <MenuItem danger onSelect={() => void s.trashNotebook(notebook.id)}>
               Chuyển vào thùng rác

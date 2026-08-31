@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, FileText, Cloud } from "lucide-react";
+import { Loader2, FileText, Users } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ export function DrivePicker({
   onClose: () => void;
   onPick: (file: { id: string; name: string; mimeType: string }) => void;
 }) {
-  const [files, setFiles] = useState<{id: string, name: string, mimeType: string}[]>([]);
+  const [files, setFiles] = useState<{ id: string; name: string; mimeType: string; isShared?: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -28,16 +28,32 @@ export function DrivePicker({
     async function loadFiles() {
       setLoading(true);
       try {
-        const res = await fetch(
-          "https://www.googleapis.com/drive/v3/files?q=mimeType='application/pdf' and trashed=false&fields=files(id,name,mimeType)&orderBy=modifiedTime desc&pageSize=100",
-          {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          }
-        );
+        const params = new URLSearchParams({
+          q: "mimeType='application/pdf' and trashed=false",
+          // Include files from Shared with me and Shared drives, not just My Drive.
+          corpora: "user",
+          includeItemsFromAllDrives: "true",
+          supportsAllDrives: "true",
+          fields: "files(id,name,mimeType,sharedWithMeTime,driveId)",
+          orderBy: "modifiedTime desc",
+          pageSize: "100",
+        });
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
         if (!res.ok) throw new Error("Không thể lấy danh sách file");
         const data = await res.json();
         if (mounted) {
-          setFiles(data.files || []);
+          const uniqueFiles = new Map<string, { id: string; name: string; mimeType: string; isShared?: boolean }>();
+          for (const file of data.files || []) {
+            uniqueFiles.set(file.id, {
+              id: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              isShared: Boolean(file.sharedWithMeTime || file.driveId),
+            });
+          }
+          setFiles([...uniqueFiles.values()]);
         }
       } catch (err: any) {
         if (mounted) toast.error(err.message);
@@ -105,6 +121,11 @@ export function DrivePicker({
               >
                 <FileText className="size-8 text-danger shrink-0" />
                 <span className="truncate text-sm font-medium flex-1">{f.name}</span>
+                {f.isShared ? (
+                  <span className="flex shrink-0 items-center gap-1 text-xs text-muted" title="Tệp được chia sẻ">
+                    <Users className="size-3.5" /> Đã chia sẻ
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
