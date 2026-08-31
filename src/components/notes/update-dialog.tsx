@@ -27,7 +27,6 @@ export function UpdateDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   if (!updateInfo) return null;
@@ -50,16 +49,11 @@ export function UpdateDialog({
     }
 
     setDownloading(true);
-    setProgress(0);
     setDownloadError(null);
 
     try {
-      await downloadAndInstallUpdate(
-        updateInfo.downloadUrl,
-        updateInfo.assetName || "MtriiNotes-Setup.exe",
-        (pct) => setProgress(pct),
-      );
-      toast.success("Đang khởi động bộ cài đặt...");
+      toast.info("Đang tải bản cập nhật và chuẩn bị nâng cấp...");
+      await downloadAndInstallUpdate(updateInfo.downloadUrl);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setDownloadError(msg);
@@ -124,23 +118,14 @@ export function UpdateDialog({
           </div>
         )}
 
-        {/* Download progress */}
+        {/* Download progress / spinner */}
         {downloading && (
-          <div className="space-y-2 rounded-lg border border-border bg-surface-2 p-3">
-            <div className="flex items-center justify-between text-xs font-medium">
-              <span className="flex items-center gap-2 text-fg">
-                <Loader2 className="size-3.5 animate-spin text-primary" />
-                Đang tải bản cập nhật...
-              </span>
-              <span className="font-bold text-primary">{progress}%</span>
+          <div className="space-y-2 rounded-lg border border-border bg-surface-2 p-3 text-center">
+            <div className="flex items-center justify-center gap-2 text-xs font-medium text-fg">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              Đang tải bộ cài đặt từ GitHub và chuẩn bị nâng cấp...
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-surface-3">
-              <div
-                className="h-full bg-primary transition-all duration-200"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-[11px] text-muted text-center">
+            <p className="text-[11px] text-muted">
               Sau khi tải xong, bộ cài đặt sẽ tự động mở để nâng cấp ứng dụng.
             </p>
           </div>
@@ -176,7 +161,7 @@ export function UpdateDialog({
             {downloading ? (
               <>
                 <Loader2 className="size-3.5 animate-spin" />
-                Đang tải ({progress}%)
+                Đang tải...
               </>
             ) : (
               <>

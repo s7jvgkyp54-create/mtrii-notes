@@ -55,13 +55,6 @@ export async function checkForGithubUpdates(
     };
   }
 
-  if (slug === "username/mtrii-notes") {
-    return {
-      ok: false,
-      message: "Vui lòng nhập chính xác GitHub username/repo của bạn trong Cài đặt.",
-    };
-  }
-
   try {
     const res = await fetch(`https://api.github.com/repos/${slug}/releases/latest`, {
       headers: {
@@ -143,58 +136,11 @@ export async function openExternalUrl(url: string) {
   window.open(url, "_blank");
 }
 
-export async function downloadAndInstallUpdate(
-  downloadUrl: string,
-  assetName: string,
-  onProgress?: (progress: number, loaded: number, total: number) => void,
-): Promise<void> {
-  if (!isDesktopRuntime()) {
-    throw new Error("Tính năng cài đặt tự động chỉ khả dụng trên ứng dụng Mtrii Notes Desktop.");
+export async function downloadAndInstallUpdate(downloadUrl: string): Promise<void> {
+  if (isDesktopRuntime()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("native_download_and_install_update", { url: downloadUrl });
+    return;
   }
-
-  const response = await fetch(downloadUrl);
-  if (!response.ok) {
-    throw new Error(`Tải bản cập nhật thất bại: HTTP ${response.status} ${response.statusText}`);
-  }
-
-  const contentLength = response.headers.get("content-length");
-  const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
-
-  let loadedBytes = 0;
-  const chunks: Uint8Array[] = [];
-
-  if (response.body && response.body.getReader) {
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        loadedBytes += value.length;
-        if (totalBytes > 0 && onProgress) {
-          const pct = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
-          onProgress(pct, loadedBytes, totalBytes);
-        }
-      }
-    }
-  } else {
-    const buffer = await response.arrayBuffer();
-    chunks.push(new Uint8Array(buffer));
-    loadedBytes = buffer.byteLength;
-    if (onProgress) onProgress(100, loadedBytes, loadedBytes);
-  }
-
-  // Combine chunks into single Uint8Array
-  const combined = new Uint8Array(loadedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    combined.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("native_install_update", {
-    filename: assetName || "MtriiNotes-Update.exe",
-    bytes: Array.from(combined),
-  });
+  window.open(downloadUrl, "_blank");
 }

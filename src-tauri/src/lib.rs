@@ -694,6 +694,52 @@ fn native_install_update(filename: String, bytes: Vec<u8>) -> Result<(), String>
     }
 }
 
+#[tauri::command]
+fn native_download_and_install_update(url: String) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir();
+    let file_path = temp_dir.join("MtriiNotes-Update.exe");
+    #[cfg(target_os = "windows")]
+    {
+        let status = std::process::Command::new("curl.exe")
+            .args(["-L", "-f", "-s", "-S", "-o", &file_path.to_string_lossy(), &url])
+            .status();
+
+        let success = match status {
+            Ok(s) => s.success(),
+            Err(_) => false,
+        };
+
+        if !success {
+            let ps_status = std::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!(
+                        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('{}', '{}')",
+                        url,
+                        file_path.display()
+                    ),
+                ])
+                .status()
+                .map_err(err)?;
+
+            if !ps_status.success() {
+                return Err("Tải file cập nhật từ GitHub thất bại.".to_string());
+            }
+        }
+
+        std::process::Command::new(&file_path)
+            .spawn()
+            .map_err(err)?;
+        std::process::exit(0);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = url;
+        Ok(())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -718,6 +764,7 @@ pub fn run() {
             native_open_data_folder,
             native_open_browser_url,
             native_install_update,
+            native_download_and_install_update,
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động Mtrii Notes");
