@@ -81,6 +81,24 @@ export function EditorView({ notebookId }: { notebookId: string }) {
   }, [notebookId]);
 
   useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          useNotesStore.getState().redo();
+        } else {
+          useNotesStore.getState().undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        useNotesStore.getState().redo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
     function onWheel(e: WheelEvent) {
