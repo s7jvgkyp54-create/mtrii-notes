@@ -193,6 +193,9 @@ function patchNb(id: string, partial: Partial<Notebook>) {
   if (nb) void enqueue("notebook", () => db.putNotebook(nb));
 }
 
+let objectsSaveTimeout: any = null;
+const pendingSaves = new Map<string, CanvasObject[]>();
+
 export const useNotesStore = create<NotesState>((set, get) => ({
   ready: false,
   bootError: null,
@@ -725,7 +728,19 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ history: { ...get().history, [nbId]: hist } });
     }
     set({ objectsByPage: { ...get().objectsByPage, [pageId]: objects } });
-    void enqueue("objects", () => db.putObjects(pageId, objects));
+    
+    pendingSaves.set(pageId, objects);
+    if (objectsSaveTimeout) clearTimeout(objectsSaveTimeout);
+    objectsSaveTimeout = setTimeout(() => {
+      const saves = Array.from(pendingSaves.entries());
+      pendingSaves.clear();
+      void enqueue("objects-batch", async () => {
+        for (const [pId, objs] of saves) {
+          await db.putObjects(pId, objs);
+        }
+      });
+    }, 500);
+
     const nbId = get().activeNotebookId;
     if (nbId) patchNb(nbId, {});
   },
