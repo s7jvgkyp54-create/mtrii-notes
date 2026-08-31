@@ -90,7 +90,7 @@ export function PageSurface({
   
   function updateLocalObjects(next: import("@/lib/notes/types").CanvasObject[] | null) {
       localRef.current = next;
-      updateLocalObjects(next);
+      setLocalObjects(next);
   }
   const objects = localObjects ?? globalObjects;
   
