@@ -256,31 +256,50 @@ export function PageSurface({
         setEditing(hit);
         return;
       }
+      // Create text object but do NOT commit until user types something (avoid blank flash)
       const t: Extract<CanvasObject, { type: "text" }> = {
         id: nid(),
         type: "text",
         x: p.x,
         y: p.y,
-        w: 220,
-        h: 64,
+        w: 240,
+        h: 72,
         text: "",
         fontSize: tool.fontSize,
         color: tool.color,
         align: "left",
       };
-      commit([...objects, t]);
       setEditing(t);
       return;
     }
 
     if (tool.name === "image") {
+      const clickPos = p;
       const input = document.createElement("input");
       input.type = "file";
       input.accept = "image/*";
+      input.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+      document.body.appendChild(input);
       input.onchange = async () => {
+        document.body.removeChild(input);
         const file = input.files?.[0];
         if (!file) return;
-        const blob = new Blob([await file.arrayBuffer()], { type: file.type });
+        const buf = await file.arrayBuffer();
+        const blob = new Blob([buf], { type: file.type });
+        // Get natural image dimensions
+        const imgUrl = URL.createObjectURL(blob);
+        const naturalSize = await new Promise<{w:number;h:number}>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+          img.onerror = () => resolve({ w: 160, h: 120 });
+          img.src = imgUrl;
+        });
+        URL.revokeObjectURL(imgUrl);
+        // Fit image: max 400px wide/tall
+        const maxDim = 400;
+        const ratio = Math.min(maxDim / naturalSize.w, maxDim / naturalSize.h, 1);
+        const iw = Math.round(naturalSize.w * ratio);
+        const ih = Math.round(naturalSize.h * ratio);
         const id = nid();
         const { putAsset } = await import("@/lib/notes/db");
         await putAsset({
@@ -292,17 +311,21 @@ export function PageSurface({
           blob,
           createdAt: Date.now(),
         });
+        const imgId = nid();
         const imgObj: CanvasObject = {
-          id: nid(),
+          id: imgId,
           type: "image",
-          x: p.x - 80,
-          y: p.y - 60,
-          w: 160,
-          h: 120,
+          x: clickPos.x - iw / 2,
+          y: clickPos.y - ih / 2,
+          w: iw,
+          h: ih,
           rotation: 0,
           assetId: id,
         };
-        commit([...useNotesStore.getState().objectsByPage[page.id] ?? objects, imgObj]);
+        const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+        commit([...current, imgObj]);
+        // Auto-select so user can immediately move/resize
+        setSelected([imgId]);
       };
       input.click();
       return;
@@ -557,25 +580,33 @@ export function PageSurface({
       {editing ? (
         <textarea
           autoFocus
-          className="absolute resize-none border border-accent bg-paper/90 p-1 text-fg outline-none"
+          className="absolute resize-none border-2 border-accent bg-surface-2/95 p-1.5 text-fg outline-none shadow-lg"
           style={{
-            left: (editing.x / page.width) * cssW,
-            top: (editing.y / page.height) * cssH,
-            width: (editing.w / page.width) * cssW,
-            height: Math.max(40, (editing.h / page.height) * cssH),
+            left: editing.x * zoom,
+            top: editing.y * zoom,
+            width: Math.max(120, editing.w * zoom),
+            height: Math.max(40, editing.h * zoom),
             fontSize: editing.fontSize * zoom,
             color: editing.color,
             fontFamily: "Be Vietnam Pro, sans-serif",
+            zIndex: 50,
+            lineHeight: 1.4,
           }}
           defaultValue={editing.text}
           onBlur={(e) => {
-            const text = e.target.value;
+            const text = e.target.value.trim();
             const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-            commit(
-              current.map((o) =>
-                o.id === editing.id && o.type === "text" ? { ...o, text } : o,
-              ),
-            );
+            const exists = current.some((o) => o.id === editing.id);
+            if (text) {
+              if (exists) {
+                commit(current.map((o) => o.id === editing.id && o.type === "text" ? { ...o, text } : o));
+              } else {
+                commit([...current, { ...editing, text }]);
+              }
+            } else if (exists) {
+              // Remove empty text objects when cleared
+              commit(current.filter((o) => o.id !== editing.id));
+            }
             setEditing(null);
           }}
         />
