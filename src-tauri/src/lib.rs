@@ -1,3 +1,8 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -663,7 +668,9 @@ fn native_open_data_folder(app: AppHandle) -> Result<(), String> {
 fn native_open_browser_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd
             .args(["/c", "start", "", &url])
             .spawn()
             .map_err(err)?;
@@ -700,7 +707,9 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
     let file_path = temp_dir.join("MtriiNotes-Update.exe");
     #[cfg(target_os = "windows")]
     {
-        let status = std::process::Command::new("curl.exe")
+        let mut cmd = std::process::Command::new("curl.exe");
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let status = cmd
             .args(["-L", "-f", "-s", "-S", "-o", &file_path.to_string_lossy(), &url])
             .status();
 
@@ -710,7 +719,9 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
         };
 
         if !success {
-            let ps_status = std::process::Command::new("powershell")
+            let mut ps_cmd = std::process::Command::new("powershell");
+            ps_cmd.creation_flags(CREATE_NO_WINDOW);
+            let ps_status = ps_cmd
                 .args([
                     "-NoProfile",
                     "-Command",
