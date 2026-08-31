@@ -49,6 +49,11 @@ export function LibraryView() {
   const folders = useNotesStore((s) => s.folders);
   const folderId = useNotesStore((s) => s.folderId);
   const query = useNotesStore((s) => s.query);
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => clearTimeout(t);
+  }, [query]);
   const layout = useNotesStore((s) => s.layout);
   const sort = useNotesStore((s) => s.sort);
   const notebooks = useNotesStore((s) => s.notebooks);
@@ -66,21 +71,59 @@ export function LibraryView() {
   const [dragging, setDragging] = useState(false);
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [renderCount, setRenderCount] = useState(50);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const items = useMemo(() => visibleNotebooks(), [notebooks, section, folderId, query, sort]);
+  useEffect(() => {
+    setRenderCount(50); // reset on section change
+  }, [section, folderId, debouncedQuery, sort]);
+
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    observerRef.current = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        setRenderCount((c) => c + 50);
+      }
+    });
+    observerRef.current.observe(loadMoreRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [items]);
+
+  const items = useMemo(() => {
+    let list = notebooks.filter((n) => !n.deletedAt);
+    if (section === "trash") list = notebooks.filter((n) => n.deletedAt);
+    else if (section === "favorites") list = list.filter((n) => n.favorite);
+    else if (section === "recent") list = list.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 50);
+
+    if (section === "all") {
+      if (folderId) list = list.filter((n) => n.folderId === folderId);
+      else if (!debouncedQuery.trim()) list = list.filter((n) => !n.folderId);
+    }
+
+    if (debouncedQuery.trim()) {
+      const q = debouncedQuery.trim().toLowerCase();
+      list = list.filter((n) => n.name.toLowerCase().includes(q));
+    }
+
+    if (sort === "name") list.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === "updated") list.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    return list;
+  }, [notebooks, section, folderId, debouncedQuery, sort]);
 
   const visibleFolders = useMemo(() => {
     if (section !== "all") return [];
     let list = folders.filter((f) => !f.deletedAt);
     if (folderId) list = list.filter((f) => f.parentId === folderId);
-    else if (!query.trim()) list = list.filter((f) => !f.parentId);
+    else if (!debouncedQuery.trim()) list = list.filter((f) => !f.parentId);
 
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
+    if (debouncedQuery.trim()) {
+      const q = debouncedQuery.trim().toLowerCase();
       list = list.filter((f) => f.name.toLowerCase().includes(q));
     }
     return list;
-  }, [folders, section, folderId, query]);
+  }, [folders, section, folderId, debouncedQuery]);
 
   useEffect(() => {
     setMounted(true);
@@ -418,7 +461,7 @@ export function LibraryView() {
                   ) : null}
                   {layout === "grid" ? (
                     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                      {items.map((nb) => (
+                      {items.slice(0, renderCount).map((nb) => (
                         <NotebookTile
                           key={nb.id}
                           notebook={nb}
@@ -438,7 +481,7 @@ export function LibraryView() {
                     </div>
                   ) : (
                     <ul className="divide-y divide-border rounded-lg border border-border bg-surface-2">
-                      {items.map((nb) => (
+                      {items.slice(0, renderCount).map((nb) => (
                         <li key={nb.id} className="flex items-center gap-3 px-3 py-2">
                           {selecting ? (
                             <button
@@ -966,7 +1009,7 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
               {notebook.favorite ? "Bỏ yêu thích" : "Yêu thích"}
             </MenuItem>
             <MenuItem onSelect={() => void s.exportPdf(notebook.id)}>Xuất PDF</MenuItem>
-            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id)}>
+            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id).then(() => toast.success("?? xu?t b?n sao")).catch((e) => toast.error(String(e)))}>
               Xuất bản sao sổ
             </MenuItem>
             <MenuSep />

@@ -807,9 +807,15 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       pages: payload.pages,
       objects: payload.objects,
     });
+    if (bytes.length < 100) throw new Error("T?p PDF xu?t ra qu? nh?, c? th? b? l?i.");
+    const header = new TextDecoder().decode(bytes.slice(0, 5));
+    if (header !== "%PDF-") throw new Error("T?p xu?t ra kh?ng ??ng ??nh d?ng PDF (sai Header).");
+    const footerStr = new TextDecoder().decode(bytes.slice(-200));
+    if (!footerStr.includes("%%EOF")) throw new Error("T?p xu?t ra kh?ng ??ng ??nh d?ng PDF (thi?u EOF).");
+    
     const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
-    downloadBlob(blob, `${nb.name}.pdf`);
+    await downloadBlob(blob, `${nb.name}.pdf`);
   },
 
   exportBackup: async (kind, notebookId) => {
@@ -821,7 +827,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       kind === "notebook"
         ? `${get().notebooks.find((n) => n.id === notebookId)?.name ?? "so"}-${stamp}.notesbackup`
         : `notes-${stamp}.notesbackup`;
-    downloadBlob(blob, name);
+    await downloadBlob(blob, name);
     const rec = {
       id: nid(),
       createdAt: Date.now(),

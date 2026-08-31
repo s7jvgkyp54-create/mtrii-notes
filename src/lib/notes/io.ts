@@ -62,6 +62,7 @@ async function drawObjectsOnPdfPage(
 ) {
   if (!objects.length) return;
   for (const o of objects) {
+      if (Number.isNaN(o.x) || Number.isNaN(o.y) || !Number.isFinite(o.x) || !Number.isFinite(o.y)) continue;
     if (o.type === "stroke") {
       const path = strokeToSvgPath(o);
       if (path) {

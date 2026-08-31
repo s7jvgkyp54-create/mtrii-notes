@@ -84,7 +84,20 @@ export function PageSurface({
   zoom: number;
   active: boolean;
 }) {
-  const objects = useNotesStore((s) => s.objectsByPage[page.id] ?? EMPTY);
+  const globalObjects = useNotesStore((s) => s.objectsByPage[page.id] ?? EMPTY);
+  const [localObjects, setLocalObjects] = useState<import("@/lib/notes/types").CanvasObject[] | null>(null);
+  const localRef = useRef<import("@/lib/notes/types").CanvasObject[] | null>(null);
+  
+  function updateLocalObjects(next: import("@/lib/notes/types").CanvasObject[] | null) {
+      localRef.current = next;
+      updateLocalObjects(next);
+  }
+  const objects = localObjects ?? globalObjects;
+  
+  useEffect(() => {
+    // When global objects change (e.g. from undo or sync), clear local override
+    updateLocalObjects(null);
+  }, [globalObjects]);
   const tool = useNotesStore((s) => s.tool);
   const penOnly = useNotesStore((s) => s.settings.penOnly);
   const notebook = useNotesStore((s) => s.notebooks.find((n) => n.id === page.notebookId));
@@ -124,6 +137,21 @@ export function PageSurface({
     ids: string[];
   } | null>(null);
 
+  const [isVisible, setIsVisible] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setIsVisible(entries[0].isIntersecting);
+      },
+      { rootMargin: "1000px" } // Render pages within 1000px of viewport
+    );
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+  
   const disp = displaySize(page);
   const cssW = disp.w * zoom;
   const cssH = disp.h * zoom;
@@ -567,7 +595,7 @@ export function PageSurface({
         const next = (useNotesStore.getState().objectsByPage[page.id] ?? objects).map((o) =>
           ids.has(o.id) ? translateObject(o, dx, dy) : o,
         );
-        useNotesStore.getState().commitObjects(page.id, next, false);
+        updateLocalObjects(next);
         continue;
       }
       if (drag.current?.kind === "lasso" || isPen(tool.name) || isShape(tool.name)) {
@@ -615,7 +643,7 @@ export function PageSurface({
 
     // Eraser: all intermediate moves were non-undoable; commit once here as a single undo step
     if (tool.name === "eraser") {
-      const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+      const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
       useNotesStore
         .getState()
         .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
