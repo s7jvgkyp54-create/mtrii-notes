@@ -843,6 +843,7 @@ fn native_install_update(filename: String, bytes: Vec<u8>) -> Result<(), String>
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new(&file_path)
+            .args(["/S"])
             .spawn()
             .map_err(err)?;
         std::process::exit(0);
@@ -892,6 +893,7 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
         }
 
         std::process::Command::new(&file_path)
+            .args(["/S"])
             .spawn()
             .map_err(err)?;
         std::process::exit(0);
