@@ -159,6 +159,9 @@ export interface AppSettings {
   lastBackupAt: number | null;
   lastSaveAt: number | null;
   autoCheckUpdates: boolean;
+  googleDriveClientId: string;
+  googleDriveClientSecret: string;
+  googleDriveAccessToken: string | null;
   githubRepo: string;
   lastUpdateCheckAt: number | null;
   openTabIds: string[];
@@ -249,6 +252,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupAt: null,
   lastSaveAt: null,
   autoCheckUpdates: true,
+  googleDriveClientId: "",
+  googleDriveClientSecret: "",
+  googleDriveAccessToken: null,
   githubRepo: "s7jvgkyp54-create/mtrii-notes",
   lastUpdateCheckAt: null,
   openTabIds: [],

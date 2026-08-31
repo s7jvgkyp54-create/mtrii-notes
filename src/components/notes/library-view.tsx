@@ -32,6 +32,8 @@ import { useNotesNavigate } from "@/lib/notes/navigation";
 import type { Folder, LibrarySection, Notebook } from "@/lib/notes/types";
 import { NotesMark } from "./logo";
 import { NotebookCover } from "./cover";
+import { DrivePicker } from "./drive-picker";
+import { Cloud } from "lucide-react";
 import { CreateNotebookDialog } from "./create-dialog";
 
 const NAV: { id: LibrarySection; label: string; icon: typeof LayoutGrid }[] = [
@@ -55,6 +57,8 @@ export function LibraryView() {
   const selectedIds = useNotesStore((s) => s.selectedIds);
   const storageUsage = useNotesStore((s) => s.storageUsage);
   const [createOpen, setCreateOpen] = useState(false);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const settings = useNotesStore((s) => s.settings);
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderName, setFolderName] = useState("Thư mục mới");
   const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
@@ -93,6 +97,26 @@ export function LibraryView() {
   async function openNb(id: string) {
     await useNotesStore.getState().openNotebook(id);
     await navigate({ to: "/notebook/$id", params: { id } });
+  }
+
+  
+  async function onDriveImport(driveFile: { id: string; name: string; mimeType: string }) {
+    setDriveOpen(false);
+    const id = toast.loading("Đang tải file từ Google Drive...");
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveFile.id}?alt=media`, {
+        headers: { Authorization: `Bearer ${settings.googleDriveAccessToken}` }
+      });
+      if (!res.ok) throw new Error("Lỗi tải file");
+      const blob = await res.blob();
+      const file = new File([blob], driveFile.name, { type: driveFile.mimeType });
+      
+      const nbId = await useNotesStore.getState().importPdf(file);
+      toast.success(`Đã nhập ${file.name}`, { id });
+      await openNb(nbId);
+    } catch (err: any) {
+      toast.error(err.message || "Không tải được file", { id });
+    }
   }
 
   async function onImport(files: FileList | File[]) {
@@ -460,6 +484,12 @@ export function LibraryView() {
 
       {selecting ? <SelectionBar selectedIds={selectedIds} section={section} /> : null}
 
+      <DrivePicker
+        open={driveOpen}
+        accessToken={settings.googleDriveAccessToken}
+        onClose={() => setDriveOpen(false)}
+        onPick={onDriveImport}
+      />
       <CreateNotebookDialog
         open={createOpen}
         onOpenChange={setCreateOpen}

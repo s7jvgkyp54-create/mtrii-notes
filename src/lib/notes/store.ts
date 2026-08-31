@@ -137,7 +137,7 @@ interface NotesState {
   setPagePaper: (pageId: string, paper: PaperStyle) => Promise<void>;
   reorderPages: (from: number, to: number) => Promise<void>;
 
-  commitObjects: (pageId: string, objects: CanvasObject[], undoable?: boolean) => void;
+  commitObjects: (pageId: string, objects: CanvasObject[], undoable?: boolean, beforeState?: CanvasObject[]) => void;
   undo: () => void;
   redo: () => void;
   addBookmark: (pageId: string, title: string) => Promise<void>;
@@ -678,11 +678,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     });
   },
 
-  commitObjects: (pageId, objects, undoable = true) => {
+  commitObjects: (pageId, objects, undoable = true, beforeState) => {
     if (undoable) {
       const nbId = get().activeNotebookId ?? "x";
       const hist = get().history[nbId] ?? { past: [], future: [] };
-      hist.past = [...hist.past.slice(-49), { pageId, objects: get().objectsByPage[pageId] ?? [] }];
+      hist.past = [...hist.past.slice(-49), { pageId, objects: beforeState ?? get().objectsByPage[pageId] ?? [] }];
       hist.future = [];
       set({ history: { ...get().history, [nbId]: hist } });
     }

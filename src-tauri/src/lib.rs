@@ -1,5 +1,75 @@
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+mod oauth;
+
+#[tauri::command]
+async fn start_google_oauth(client_id: String, client_secret: String) -> Result<oauth::OAuthTokens, String> {
+    let (redirect_uri, rx) = oauth::start_local_server()?;
+    
+    let auth_url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive.readonly",
+        client_id, urlencoding::encode(&redirect_uri)
+    );
+    
+    // Open browser
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd").args(["/C", "start", "", &auth_url.replace("&", "^&")]).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(&auth_url).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("xdg-open").arg(&auth_url).spawn();
+    
+    // Wait for code (with a 2-minute timeout handled by the server loop)
+    let code = rx.recv().map_err(|_| "Timeout hoac loi khi cho ma xac thuc".to_string())?;
+    
+    // Exchange for tokens
+    oauth::exchange_code(&client_id, &client_secret, &code, &redirect_uri).await
+}
+
+#[tauri::command]
+async fn download_drive_file(
+    app: tauri::AppHandle,
+    access_token: String,
+    file_id: String,
+    mime_type: String,
+    file_name: String,
+) -> Result<String, String> {
+    let paths = paths(&app)?;
+    let asset_id = uuid::Uuid::new_v4().to_string();
+    
+    let client = reqwest::Client::new();
+    let url = format!("https://www.googleapis.com/drive/v3/files/{}?alt=media", file_id);
+    
+    let res = client.get(&url)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await
+        .map_err(|e| format!("Loi khi goi API Google Drive: {}", e))?;
+        
+    if !res.status().is_success() {
+        return Err(format!("Google Drive tra ve loi: {}", res.status()));
+    }
+    
+    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    
+    let ext = if mime_type == "application/pdf" { "pdf" } else { "png" };
+    let filename = format!("{}.{}", asset_id, ext);
+    let path = paths.assets.join(&filename);
+    
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    
+    // Also save to database
+    let db_path = paths.database.clone();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    conn.execute(
+        "INSERT INTO assets (id, kind, mime, name, byteLength, createdAt) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![asset_id, if ext == "pdf" { "pdf" } else { "image" }, mime_type, file_name, bytes.len() as i64, now],
+    ).map_err(|e| e.to_string())?;
+    
+    Ok(asset_id)
+}
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -836,7 +906,7 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(tauri::generate_handler![start_google_oauth, download_drive_file, 
             native_initialize,
             native_get_all,
             native_get_by_notebook,
@@ -862,3 +932,5 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("Không thể khởi động Notes");
 }
+
+

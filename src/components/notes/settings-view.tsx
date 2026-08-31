@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, FolderOpen, HardDrive, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, FolderOpen, HardDrive, Loader2, RefreshCw, Cloud } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -218,6 +219,69 @@ export function SettingsView() {
               ))
             )}
           </ul>
+        </section>
+
+        
+        <section>
+          <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted uppercase">Google Drive</h2>
+          <Row
+            label="Client ID"
+            hint="Để bảo mật, ứng dụng yêu cầu Google Client ID của riêng bạn. Tạo tại Google Cloud Console (Loại: Desktop/Web)."
+          >
+            <input
+              type="text"
+              className="h-10 w-64 rounded-md border border-border bg-surface-2 px-3 text-sm placeholder:text-muted/50"
+              placeholder="YOUR_CLIENT_ID"
+              value={settings.googleDriveClientId || ""}
+              onChange={(e) => useNotesStore.getState().persistSettings({ googleDriveClientId: e.target.value })}
+            />
+          </Row>
+          <Row label="Client Secret" hint="Tuỳ chọn (Nếu dùng Web App Credentials).">
+            <input
+              type="password"
+              className="h-10 w-64 rounded-md border border-border bg-surface-2 px-3 text-sm"
+              placeholder="YOUR_CLIENT_SECRET"
+              value={settings.googleDriveClientSecret || ""}
+              onChange={(e) => useNotesStore.getState().persistSettings({ googleDriveClientSecret: e.target.value })}
+            />
+          </Row>
+          <div className="mt-4 flex items-center justify-between rounded-xl border border-border bg-surface-2 p-4">
+            <div className="flex items-center gap-3">
+              <Cloud className="size-8 text-accent" />
+              <div>
+                <p className="font-semibold">{settings.googleDriveAccessToken ? "Đã kết nối Google Drive" : "Chưa kết nối"}</p>
+                <p className="text-sm text-muted">
+                  Kết nối để tải file/PDF từ Drive trực tiếp vào ghi chú.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={async () => {
+                if (settings.googleDriveAccessToken) {
+                  useNotesStore.getState().persistSettings({ googleDriveAccessToken: null });
+                  toast.success("Đã ngắt kết nối Google Drive");
+                  return;
+                }
+                if (!settings.googleDriveClientId) {
+                  toast.error("Vui lòng nhập Client ID");
+                  return;
+                }
+                const id = toast.loading("Đang chờ xác thực từ trình duyệt...");
+                try {
+                  const tokens = await invoke("start_google_oauth", {
+                    clientId: settings.googleDriveClientId,
+                    clientSecret: settings.googleDriveClientSecret || "",
+                  }) as any;
+                  useNotesStore.getState().persistSettings({ googleDriveAccessToken: tokens.access_token });
+                  toast.success("Kết nối thành công", { id });
+                } catch (e: any) {
+                  toast.error(e.toString(), { id });
+                }
+              }}
+            >
+              {settings.googleDriveAccessToken ? "Ngắt kết nối" : "Đăng nhập"}
+            </Button>
+          </div>
         </section>
 
         <section>

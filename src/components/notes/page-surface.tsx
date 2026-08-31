@@ -60,6 +60,7 @@ export function PageSurface({
   const drawing = useRef(false);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
+  const strokeBeforeState = useRef<CanvasObject[] | null>(null);
   const baseRef = useRef<HTMLCanvasElement>(null);
   const baseReady = useRef(false);
   const lastPdfAsset = useRef<string | undefined>(undefined);
@@ -249,6 +250,7 @@ export function PageSurface({
     (ev.target as HTMLCanvasElement).setPointerCapture(ev.pointerId);
     const p = toPage(ev);
     const pressure = ev.pressure > 0 ? ev.pressure : 0.5;
+    strokeBeforeState.current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
 
     if (tool.name === "text") {
       const hit = [...objects].reverse().find((o) => o.type === "text" && hitTest(o, p, 2));
@@ -434,14 +436,16 @@ export function PageSurface({
     // Eraser: all intermediate moves were non-undoable; commit once here as a single undo step
     if (tool.name === "eraser") {
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-      useNotesStore.getState().commitObjects(page.id, current, true);
+      useNotesStore.getState().commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      strokeBeforeState.current = null;
       return;
     }
 
     if (drag.current?.kind === "move") {
       drag.current = null;
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-      useNotesStore.getState().commitObjects(page.id, current, true);
+      useNotesStore.getState().commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      strokeBeforeState.current = null;
       return;
     }
     if (drag.current?.kind === "lasso") {
