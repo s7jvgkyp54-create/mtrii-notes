@@ -242,7 +242,7 @@ export function SettingsView() {
                   toast.success("Đã ngắt kết nối Google Drive");
                   return;
                 }
-                const { GOOGLE_CLIENT_ID } = await import("@/lib/notes/types");
+                const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = await import("@/lib/notes/types");
                 if (GOOGLE_CLIENT_ID === "YOUR_CLIENT_ID_HERE") {
                   toast.error("Tính năng này chưa được thiết lập (Thiếu Client ID)");
                   return;
@@ -251,7 +251,7 @@ export function SettingsView() {
                 try {
                   const tokens = await invoke("start_google_oauth", {
                     clientId: GOOGLE_CLIENT_ID,
-                    clientSecret: "",
+                    clientSecret: GOOGLE_CLIENT_SECRET,
                   }) as any;
                   useNotesStore.getState().persistSettings({ googleDriveAccessToken: tokens.access_token });
                   toast.success("Kết nối thành công", { id });
