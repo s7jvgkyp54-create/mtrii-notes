@@ -271,7 +271,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     set({ storageUsage: e.usage, storageQuota: e.quota });
   },
 
-  setSection: (section) => set({ section, selectedIds: [], selecting: false }),
+  setSection: (section) => set({ section, folderId: null, selectedIds: [], selecting: false }),
   setFolder: (folderId) => set({ folderId, section: "all" }),
   setQuery: (query) => set({ query }),
   setSort: (sort) => set({ sort }),

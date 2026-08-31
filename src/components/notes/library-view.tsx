@@ -63,14 +63,11 @@ export function LibraryView() {
   const items = useMemo(() => visibleNotebooks(), [notebooks, section, folderId, query, sort]);
 
   const visibleFolders = useMemo(() => {
-    if (section !== "all" && section !== "trash") return [];
-    let list = folders;
-    if (section === "trash") list = list.filter((f) => f.deletedAt);
-    else {
-      list = list.filter((f) => !f.deletedAt);
-      if (folderId) list = list.filter((f) => f.parentId === folderId);
-      else if (!query.trim()) list = list.filter((f) => !f.parentId);
-    }
+    if (section !== "all") return [];
+    let list = folders.filter((f) => !f.deletedAt);
+    if (folderId) list = list.filter((f) => f.parentId === folderId);
+    else if (!query.trim()) list = list.filter((f) => !f.parentId);
+
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter((f) => f.name.toLowerCase().includes(q));
@@ -146,11 +143,10 @@ export function LibraryView() {
                 type="button"
                 onClick={() => {
                   useNotesStore.getState().setSection(n.id);
-                  useNotesStore.getState().setFolder(null);
                   useNotesStore.getState().setSidebarOpen(false);
                 }}
                 className={cn(
-                  "flex h-11 items-center gap-3 rounded-md px-3 text-sm cursor-pointer",
+                  "flex h-11 items-center gap-3 rounded-md px-3 text-sm cursor-pointer transition-colors",
                   active ? "bg-accent-soft font-medium text-accent" : "text-fg hover:bg-overlay",
                 )}
               >
@@ -167,12 +163,11 @@ export function LibraryView() {
                 key={f.id}
                 type="button"
                 onClick={() => {
-                  useNotesStore.getState().setSection("all");
                   useNotesStore.getState().setFolder(f.id);
                   useNotesStore.getState().setSidebarOpen(false);
                 }}
                 className={cn(
-                  "flex h-10 items-center gap-3 rounded-md px-3 text-sm cursor-pointer",
+                  "flex h-10 items-center gap-3 rounded-md px-3 text-sm cursor-pointer transition-colors",
                   section === "all" && folderId === f.id ? "bg-accent-soft font-medium text-accent" : "hover:bg-overlay",
                 )}
               >
@@ -183,7 +178,7 @@ export function LibraryView() {
           <button
             type="button"
             onClick={() => setFolderOpen(true)}
-            className="mt-1 flex h-10 items-center gap-3 rounded-md px-3 text-sm text-muted hover:bg-overlay cursor-pointer"
+            className="mt-1 flex h-10 items-center gap-3 rounded-md px-3 text-sm text-muted hover:bg-overlay cursor-pointer transition-colors"
           >
             <FolderPlus className="size-4" />
             Thư mục mới
@@ -268,10 +263,12 @@ export function LibraryView() {
             {selecting ? <X /> : <CheckSquare2 />}
             <span className="hidden sm:inline">{selecting ? "Xong" : "Chọn"}</span>
           </Button>
-          <Button variant="outline" onClick={() => setFolderOpen(true)} className="gap-1.5">
-            <FolderPlus className="size-4" />
-            <span className="hidden sm:inline">Thư mục</span>
-          </Button>
+          {section === "all" ? (
+            <Button variant="outline" onClick={() => setFolderOpen(true)} className="gap-1.5">
+              <FolderPlus className="size-4" />
+              <span className="hidden sm:inline">Thư mục</span>
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={() => fileRef.current?.click()}>
             <FileUp />
             <span className="hidden sm:inline">Nhập PDF</span>
@@ -319,6 +316,7 @@ export function LibraryView() {
               onCreate={() => setCreateOpen(true)}
               onNewFolder={() => setFolderOpen(true)}
               onImport={() => fileRef.current?.click()}
+              section={section}
               isFolder={Boolean(folderId)}
             />
           ) : (
@@ -466,7 +464,6 @@ function FolderTile({ folder }: { folder: Folder }) {
       <button
         type="button"
         onClick={() => {
-          useNotesStore.getState().setSection("all");
           useNotesStore.getState().setFolder(folder.id);
         }}
         className="flex h-28 w-full flex-col justify-between rounded-xl border border-border bg-surface-2 p-3 text-left transition-all hover:border-accent/60 hover:bg-surface-3 hover:shadow-md cursor-pointer select-none"
@@ -505,7 +502,6 @@ function FolderRow({ folder }: { folder: Folder }) {
         type="button"
         className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
         onClick={() => {
-          useNotesStore.getState().setSection("all");
           useNotesStore.getState().setFolder(folder.id);
         }}
       >
@@ -573,35 +569,53 @@ function EmptyLibrary({
   onCreate,
   onNewFolder,
   onImport,
+  section,
   isFolder,
 }: {
   onCreate: () => void;
   onNewFolder: () => void;
   onImport: () => void;
+  section: LibrarySection;
   isFolder: boolean;
 }) {
+  let title = "Chưa có tài liệu nào";
+  let desc = "Tạo thư mục để phân loại hoặc tạo sổ mới ngay để bắt đầu viết.";
+  let Icon = MtriiMark;
+
+  if (isFolder) {
+    title = "Thư mục này đang trống";
+    desc = "Tạo sổ mới hoặc thêm thư mục con vào thư mục này để bắt đầu.";
+  } else if (section === "recent") {
+    title = "Chưa có tài liệu mở gần đây";
+    desc = "Các sổ tay bạn vừa xem hoặc chỉnh sửa sẽ xuất hiện tại đây.";
+  } else if (section === "favorites") {
+    title = "Chưa có tài liệu yêu thích";
+    desc = "Bấm vào biểu tượng '...' trên sổ tay và chọn 'Yêu thích' để ghim vào đây.";
+  } else if (section === "trash") {
+    title = "Thùng rác đang trống";
+    desc = "Các sổ tay đã xóa sẽ được lưu tạm tại đây trước khi xóa vĩnh viễn.";
+  }
+
   return (
     <div className="mx-auto flex max-w-md flex-col items-center py-16 text-center">
       <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/10 text-accent mb-2 shadow-sm">
         {isFolder ? <FolderOpen className="size-8" /> : <MtriiMark className="size-10" />}
       </div>
-      <h2 className="mt-3 text-lg font-semibold">{isFolder ? "Thư mục này đang trống" : "Chưa có tài liệu nào"}</h2>
-      <p className="mt-1.5 text-xs text-muted max-w-xs">
-        {isFolder
-          ? "Tạo sổ mới hoặc thêm thư mục con vào thư mục này để bắt đầu."
-          : "Tạo thư mục để phân loại hoặc tạo sổ mới ngay để bắt đầu viết."}
-      </p>
-      <div className="mt-5 flex flex-wrap justify-center gap-2">
-        <Button onClick={onCreate} size="sm">
-          <Plus className="size-4" /> Tạo sổ mới
-        </Button>
-        <Button variant="outline" size="sm" onClick={onNewFolder}>
-          <FolderPlus className="size-4" /> Tạo thư mục
-        </Button>
-        <Button variant="outline" size="sm" onClick={onImport}>
-          <FileUp className="size-4" /> Nhập PDF
-        </Button>
-      </div>
+      <h2 className="mt-3 text-lg font-semibold">{title}</h2>
+      <p className="mt-1.5 text-xs text-muted max-w-xs">{desc}</p>
+      {section === "all" ? (
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button onClick={onCreate} size="sm">
+            <Plus className="size-4" /> Tạo sổ mới
+          </Button>
+          <Button variant="outline" size="sm" onClick={onNewFolder}>
+            <FolderPlus className="size-4" /> Tạo thư mục
+          </Button>
+          <Button variant="outline" size="sm" onClick={onImport}>
+            <FileUp className="size-4" /> Nhập PDF
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
