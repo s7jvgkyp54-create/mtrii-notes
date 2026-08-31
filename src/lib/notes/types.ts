@@ -1,6 +1,6 @@
 export const APP_NAME = "Notes";
 export const APP_ID = "com.mtrii.notes";
-export const APP_VERSION = "0.3.13";
+export const APP_VERSION = "0.3.22";
 export const SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = "notesbackup";
 export const BACKUP_FORMAT_VERSION = 1;
