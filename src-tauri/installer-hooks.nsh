@@ -15,3 +15,9 @@
   nsExec::Exec 'taskkill /F /IM "Mtrii Notes.exe" /T'
   Sleep 1500
 !macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  ${If} ${Silent}
+    ExecShell "" "$INSTDIR\Notes.exe"
+  ${EndIf}
+!macroend
