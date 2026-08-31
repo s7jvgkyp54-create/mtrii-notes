@@ -89,6 +89,18 @@ export function DrivePicker({
 
   if (!open) return null;
 
+  if (!accessToken) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm">
+        <div className="flex flex-col items-center gap-4 rounded-xl bg-surface p-6 shadow-xl">
+          <p className="text-sm font-medium text-danger">Chưa kết nối Google Drive</p>
+          <p className="text-xs text-muted">Vui lòng vào phần Cài đặt để đăng nhập trước.</p>
+          <button onClick={onClose} className="mt-2 rounded bg-accent px-4 py-2 text-sm text-accent-fg">Đóng</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm">
       <div className="flex flex-col items-center gap-4 rounded-xl bg-surface p-6 shadow-xl">
