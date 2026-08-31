@@ -93,6 +93,7 @@ export function PageSurface({
   const liveRef = useRef<HTMLCanvasElement>(null);
   const renderIdRef = useRef(0);
   const drawing = useRef(false);
+    const erasingNextRef = useRef<CanvasObject[] | null>(null);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
   const strokeBeforeState = useRef<CanvasObject[] | null>(null);
@@ -303,7 +304,7 @@ export function PageSurface({
   }, [notebook?.pdfAssetId, page, zoom, cssW, cssH]);
 
   // Draw just the strokes + selection overlay onto staticRef (very fast, no PDF re-render)
-  const redrawStrokes = useCallback(async () => {
+  const redrawStrokes = useCallback(async (overrideObjects?: CanvasObject[]) => {
     const renderId = ++renderIdRef.current;
     const canvas = staticRef.current;
     if (!canvas) return;
@@ -314,8 +315,9 @@ export function PageSurface({
       /* ignore */
     }
 
+    const targetObjects = overrideObjects ?? objects;
     const loadedImages = new Map<string, HTMLImageElement>();
-    for (const o of objects) {
+    for (const o of targetObjects) {
       if (o.type === "image") {
         try {
           const cached = imageCache.get(o.assetId);
@@ -341,7 +343,7 @@ export function PageSurface({
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     applyPageRotation(ctx, page, zoom, dpr);
 
-    for (const o of objects) {
+    for (const o of targetObjects) {
       if (o.type === "stroke") drawStroke(ctx, o);
       else if (o.type === "shape") drawShape(ctx, o);
       else if (o.type === "text") drawText(ctx, o);
@@ -470,6 +472,7 @@ export function PageSurface({
   }
 
   function onPointerDown(ev: React.PointerEvent<HTMLCanvasElement>) {
+      ev.currentTarget.setPointerCapture(ev.pointerId);
     activatePage();
     if (isDrawBlocked(ev.nativeEvent)) return;
     (ev.target as HTMLCanvasElement).setPointerCapture(ev.pointerId);
@@ -568,7 +571,7 @@ export function PageSurface({
       }
       if (drag.current?.kind === "lasso" || isPen(tool.name) || isShape(tool.name)) {
         const last = pts.current[pts.current.length - 1];
-        if (last && dist(last, p) < 0.35) continue;
+        if (last && dist(last, p) < 1.0 / zoom) continue;
         pts.current.push({ ...p, p: pressure });
         const ctx = setupLive();
         if (!ctx) continue;
