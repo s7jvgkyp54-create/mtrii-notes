@@ -1,0 +1,171 @@
+@import "tailwindcss";
+@source "./**/*.{ts,tsx}";
+
+@font-face {
+  font-family: "Be Vietnam Pro";
+  src: url("/fonts/BeVietnamPro-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  --bg: #efebe4;
+  --surface: #fbf8f3;
+  --surface-2: #ffffff;
+  --desk: #c9c4bb;
+  --fg: #1c1917;
+  --muted: #6b645c;
+  --subtle: #8a837a;
+  --border: color-mix(in oklab, #1c1917 12%, transparent);
+  --border-strong: color-mix(in oklab, #1c1917 22%, transparent);
+  --accent: #0f766e;
+  --accent-fg: #f7fffe;
+  --accent-soft: color-mix(in oklab, #0f766e 14%, transparent);
+  --danger: #b42318;
+  --success: #067647;
+  --warn: #b54708;
+  --paper: #fffefb;
+  --overlay: color-mix(in oklab, #1c1917 6%, transparent);
+  --ring: #0f766e;
+  --shadow-soft: 0 1px 2px color-mix(in oklab, #1c1917 8%, transparent),
+    0 10px 28px color-mix(in oklab, #1c1917 8%, transparent);
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --motion-quick: 150ms;
+  --motion-fast: 250ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  --bg: #141618;
+  --surface: #1c1f23;
+  --surface-2: #24282e;
+  --desk: #0d0f11;
+  --fg: #f4f1ec;
+  --muted: #a8a29a;
+  --subtle: #7a746c;
+  --border: color-mix(in oklab, #f4f1ec 12%, transparent);
+  --border-strong: color-mix(in oklab, #f4f1ec 22%, transparent);
+  --accent: #2dd4bf;
+  --accent-fg: #042f2e;
+  --accent-soft: color-mix(in oklab, #2dd4bf 16%, transparent);
+  --danger: #f97066;
+  --success: #47cd89;
+  --warn: #fdb022;
+  --paper: #fffefb;
+  --overlay: color-mix(in oklab, #f4f1ec 8%, transparent);
+  --ring: #2dd4bf;
+  --shadow-soft: 0 1px 2px color-mix(in oklab, #000 40%, transparent),
+    0 12px 32px color-mix(in oklab, #000 40%, transparent);
+}
+
+@theme inline {
+  --font-sans: "Be Vietnam Pro", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-desk: var(--desk);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-paper: var(--paper);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--ring);
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+@layer base {
+  html {
+    height: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    min-height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.notebook-cover {
+  box-shadow: var(--shadow-soft);
+}
+
+.page-shadow {
+  box-shadow:
+    0 1px 1px color-mix(in oklab, #1c1917 8%, transparent),
+    0 12px 40px color-mix(in oklab, #1c1917 16%, transparent);
+}
+
+.dark .page-shadow {
+  box-shadow:
+    0 1px 1px color-mix(in oklab, #000 50%, transparent),
+    0 16px 48px color-mix(in oklab, #000 55%, transparent);
+}
+
+.aspect-notebook {
+  aspect-ratio: 3 / 4;
+}
+
+.tool-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.selection-toolbar {
+  box-shadow: var(--shadow-soft);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--fg) 18%, transparent);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}

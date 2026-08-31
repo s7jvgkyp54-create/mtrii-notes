@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Mtrii Notes",
+      "hasCanvas": false,
+      "bodyTextLen": 264,
+      "bodyTextHash": "0fa370b302947d0dfcaa1842a8abbe468310982616984aaaa8dd2a77b2a95ec1",
+      "bodyTextPrefix": "Mtrii Notes Sổ tay của bạn Tất cả tài liệu Gần đây Yêu thích Thù",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Mtrii Notes",
+      "hasCanvas": false,
+      "bodyTextLen": 135,
+      "bodyTextHash": "aa8a632b2bb610f874ae5b5ad66410375a4b9c05f5ab44c2b4a6baac7e0b8b2f",
+      "bodyTextPrefix": "Tất cả tài liệu Ngày sửa Tên Tạo mới Hướng dẫn Mtrii Notes Hướng",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
