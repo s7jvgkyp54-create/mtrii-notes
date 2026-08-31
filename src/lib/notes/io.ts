@@ -1,4 +1,5 @@
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import JSZip from "jszip";
 import {
   APP_ID,
@@ -50,106 +51,65 @@ function flipY(y: number, pageH: number) {
 // Rasterize all annotations (strokes, shapes, text, images) onto a canvas
 // then embed the result as a PNG layer into the PDF page.
 // This approach guarantees the exported PDF is always viewable.
-async function rasterizeAnnotations(
-  objects: CanvasObject[],
-  pageW: number,
-  pageH: number,
-  scale: number,
-): Promise<Uint8Array | null> {
-  try {
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(pageW * scale);
-    canvas.height = Math.round(pageH * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.scale(scale, scale);
-
-    for (const o of objects) {
-      if (o.type === "stroke") {
-        drawStroke(ctx, o);
-      } else if (o.type === "shape") {
-        drawShape(ctx, o);
-      } else if (o.type === "text") {
-        drawText(ctx, o);
-      } else if (o.type === "image") {
-        try {
-          const asset = await getAsset(o.assetId);
-          if (!asset) continue;
-          const url = objectUrlFor(o.assetId, asset.blob);
-          await new Promise<void>((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              ctx.save();
-              ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
-              ctx.rotate((o.rotation * Math.PI) / 180);
-              ctx.drawImage(img, -o.w / 2, -o.h / 2, o.w, o.h);
-              ctx.restore();
-              resolve();
-            };
-            img.onerror = () => reject(new Error("Cannot load image"));
-            img.src = url;
-          });
-        } catch {
-          /* skip missing image */
-        }
-      }
-    }
-
-    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/png"));
-    if (!blob) return null;
-    return new Uint8Array(await blob.arrayBuffer());
-  } catch {
-    return null;
-  }
-}
-
 async function drawObjectsOnPdfPage(
   pdfDoc: PDFDocument,
   pdfPage: import("pdf-lib").PDFPage,
   objects: CanvasObject[],
   pageW: number,
   pageH: number,
+  imageCache: Map<string, any>,
+  customFont: import("pdf-lib").PDFFont | null
 ) {
   if (!objects.length) return;
-  // Rasterize at 2x for sharpness
-  const png = await rasterizeAnnotations(objects, pageW, pageH, 2);
-  if (!png) return;
-  try {
-    const embedded = await pdfDoc.embedPng(png);
-    pdfPage.drawImage(embedded, {
-      x: 0,
-      y: 0,
-      width: pageW,
-      height: pageH,
-    });
-  } catch {
-    /* skip if embedding fails */
+  for (const o of objects) {
+    if (o.type === "stroke") {
+      const path = strokeToSvgPath(o);
+      if (path) {
+        pdfPage.drawSvgPath(path, {
+          x: 0,
+          y: pageH,
+          color: hexRgb(o.color),
+          borderWidth: 0,
+          opacity: o.tool === "highlighter" ? 0.5 : 1,
+        });
+      }
+    } else if (o.type === "text") {
+      if (customFont) {
+        const lines = o.text.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          pdfPage.drawText(lines[i], {
+            x: o.x,
+            y: pageH - o.y - (i * o.fontSize * 1.35) - o.fontSize,
+            size: o.fontSize,
+            font: customFont,
+            color: hexRgb(o.color),
+          });
+        }
+      }
+    } else if (o.type === "image") {
+      try {
+        let img = imageCache.get(o.assetId);
+        if (!img) {
+          const asset = await getAsset(o.assetId);
+          if (!asset) continue;
+          const bytes = new Uint8Array(await asset.blob.arrayBuffer());
+          img = asset.mime.includes("png")
+            ? await pdfDoc.embedPng(bytes)
+            : await pdfDoc.embedJpg(bytes);
+          imageCache.set(o.assetId, img);
+        }
+        pdfPage.drawImage(img, {
+          x: o.x,
+          y: pageH - o.y - o.h,
+          width: o.w,
+          height: o.h,
+        });
+      } catch {}
+    }
   }
 }
 
-async function rasterizeText(o: Extract<CanvasObject, { type: "text" }>) {
-  try {
-    const scale = 2;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(2, Math.ceil(o.w * scale));
-    canvas.height = Math.max(2, Math.ceil(o.h * scale));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.scale(scale, scale);
-    ctx.clearRect(0, 0, o.w, o.h);
-    ctx.fillStyle = o.color;
-    ctx.font = `${o.fontSize}px "Be Vietnam Pro", sans-serif`;
-    ctx.textBaseline = "top";
-    o.text.split("\n").forEach((line, i) => {
-      ctx.fillText(line, 0, i * o.fontSize * 1.35, o.w);
-    });
-    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/png"));
-    if (!blob) return null;
-    return new Uint8Array(await blob.arrayBuffer());
-  } catch {
-    return null;
-  }
-}
+
 
 export async function exportNotebookPdf(opts: {
   notebook: Notebook;
@@ -160,7 +120,7 @@ export async function exportNotebookPdf(opts: {
   let pdf: PDFDocument;
   if (notebook.pdfAssetId) {
     const asset = await getAsset(notebook.pdfAssetId);
-    if (!asset) throw new Error("Thiếu tệp PDF gốc trong kho.");
+    if (!asset) throw new Error("Thi?u t?p PDF g?c trong kho.");
     pdf = await PDFDocument.load(await asset.blob.arrayBuffer(), { ignoreEncryption: true });
   } else {
     pdf = await PDFDocument.create();
@@ -169,36 +129,24 @@ export async function exportNotebookPdf(opts: {
     }
   }
 
-  const imageCache = new Map<string, Awaited<ReturnType<PDFDocument["embedPng"]>>>();
+  pdf.registerFontkit(fontkit);
+  let customFont = null;
+  try {
+    const fontRes = await fetch("/fonts/BeVietnamPro-Regular.ttf");
+    const fontBytes = await fontRes.arrayBuffer();
+    customFont = await pdf.embedFont(fontBytes);
+  } catch (e) {
+    console.error("Cannot load font", e);
+  }
+
+  const imageCache = new Map<string, any>();
 
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]!;
     const pdfPage = pdf.getPage(Math.min(i, pdf.getPageCount() - 1));
     const pageH = pdfPage.getHeight();
     const objs = objects[page.id] ?? [];
-
-    const embedImage = async (assetId: string) => {
-      const obj = objs.find((o) => o.type === "image" && o.assetId === assetId);
-      if (!obj || obj.type !== "image") return;
-      let img = imageCache.get(assetId);
-      if (!img) {
-        const asset = await getAsset(assetId);
-        if (!asset) return;
-        const bytes = new Uint8Array(await asset.blob.arrayBuffer());
-        img = asset.mime.includes("png")
-          ? await pdf.embedPng(bytes)
-          : await pdf.embedJpg(bytes);
-        imageCache.set(assetId, img);
-      }
-      pdfPage.drawImage(img, {
-        x: obj.x,
-        y: pageH - obj.y - obj.h,
-        width: obj.w,
-        height: obj.h,
-      });
-    };
-
-    await drawObjectsOnPdfPage(pdf, pdfPage, objs, pdfPage.getWidth(), pdfPage.getHeight());
+    await drawObjectsOnPdfPage(pdf, pdfPage, objs, pdfPage.getWidth(), pdfPage.getHeight(), imageCache, customFont);
   }
 
   pdf.setTitle(notebook.name);
