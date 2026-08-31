@@ -252,8 +252,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         ),
       );
       again.settings.openTabIds = validTabs;
-        const pomSession = (typeof db.getPomodoroSession === "function") ? await db.getPomodoroSession() : null;
-        const pomHistory = (typeof db.getPomodoroHistory === "function") ? await db.getPomodoroHistory() : [];
+        const pomSession = await db.getPomodoroSession();
+        const pomHistory = await db.getPomodoroHistory();
         set({
           pomodoroSession: pomSession,
           pomodoroHistory: pomHistory,

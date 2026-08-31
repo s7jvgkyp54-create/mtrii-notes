@@ -269,3 +269,25 @@ export function revokeObjectUrl(id: string) {
     urlCache.delete(id);
   }
 }
+
+export async function getPomodoroSession() {
+  if (desktop.isDesktopRuntime()) return desktop.getPomodoroSession();
+  return null;
+}
+
+export async function getPomodoroHistory() {
+  if (desktop.isDesktopRuntime()) return desktop.getPomodoroHistory();
+  return [];
+}
+
+export async function putPomodoroSession(session: import("./types").PomodoroSession | null) {
+  if (desktop.isDesktopRuntime()) return desktop.putPomodoroSession(session);
+}
+
+export async function putPomodoroRecord(record: import("./types").PomodoroRecord) {
+  if (desktop.isDesktopRuntime()) return desktop.putPomodoroRecord(record);
+}
+
+export async function clearPomodoroHistory() {
+  if (desktop.isDesktopRuntime()) return desktop.clearPomodoroHistory();
+}
