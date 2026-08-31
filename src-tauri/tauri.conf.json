@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mtrii Notes",
-  "version": "0.2.6",
-  "identifier": "com.mtrii.notes",
+  "productName": "Notes",
+  "version": "0.3.0",
+  "identifier": "com.notes.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:8080",
@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Mtrii Notes",
+        "title": "Notes",
         "width": 1360,
         "height": 900,
         "minWidth": 900,
@@ -32,10 +32,10 @@
     "active": true,
     "targets": ["nsis"],
     "createUpdaterArtifacts": false,
-    "copyright": "Copyright © 2026 Mtrii",
+    "copyright": "Copyright © 2026",
     "category": "Productivity",
     "shortDescription": "Sổ tay số riêng tư cho Windows",
-    "longDescription": "Mtrii Notes giúp viết tay, đọc và chú thích PDF, quản lý sổ tay và sao lưu dữ liệu ngay trên máy.",
+    "longDescription": "Ứng dụng Notes giúp viết tay, đọc và chú thích PDF, quản lý sổ tay và sao lưu dữ liệu ngay trên máy.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -46,7 +46,7 @@ import { getAsset } from "@/lib/notes/db";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import { PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
-import { MtriiMark } from "./logo";
+import { NotesMark } from "./logo";
 
 const PENS: { id: ToolName; label: string; icon: typeof PenLine }[] = [
   { id: "ballpoint", label: "Bút bi", icon: PenLine },
@@ -202,7 +202,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               <FileDown className="size-4" /> Xuất PDF (gộp ghi chú)
             </MenuItem>
             <MenuItem onSelect={() => void useNotesStore.getState().exportBackup("notebook", notebookId)}>
-              Xuất bản sao sổ (.mtriibackup)
+              Xuất bản sao sổ (.notesbackup)
             </MenuItem>
             <MenuSep />
             <MenuItem onSelect={() => useNotesStore.getState().persistSettings({ penOnly: !useNotesStore.getState().settings.penOnly })}>
@@ -302,7 +302,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             </Button>
             {!ready ? (
               <div className="grid h-full place-items-center">
-                <MtriiMark />
+                <NotesMark />
               </div>
             ) : (
               <div className="mx-auto flex flex-col items-center gap-6 py-8">

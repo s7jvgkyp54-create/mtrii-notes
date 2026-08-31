@@ -50,7 +50,7 @@ export async function seedLibrary() {
     y: 64,
     w: 450,
     h: 48,
-    text: "Chào mừng đến Mtrii Notes",
+    text: "Chào mừng đến với Sổ Tay",
     fontSize: 26,
     color: "#1C1917",
     align: "left",
@@ -98,7 +98,7 @@ export async function seedLibrary() {
     y: 56,
     w: 430,
     h: 280,
-    text: "PDF và sao lưu\n\nNhập PDF bằng nút Nhập trên thư viện hoặc kéo thả tệp. Nét viết gắn theo tọa độ trang nên không lệch khi thu phóng.\n\nXuất PDF để đọc ở phần mềm khác (đã gộp ghi chú). Xuất .mtriibackup để chuyển máy — giữ nét chỉnh sửa được, ảnh và PDF gốc.\n\nCtrl+Z hoàn tác · Ctrl+Y làm lại · Space+kéo để pan.",
+    text: "PDF và sao lưu\n\nNhập PDF bằng nút Nhập trên thư viện hoặc kéo thả tệp. Nét viết gắn theo tọa độ trang nên không lệch khi thu phóng.\n\nXuất PDF để đọc ở phần mềm khác (đã gộp ghi chú). Xuất .notesbackup để chuyển máy — giữ nét chỉnh sửa được, ảnh và PDF gốc.\n\nCtrl+Z hoàn tác · Ctrl+Y làm lại · Space+kéo để pan.",
     fontSize: 13,
     color: "#1C1917",
     align: "left",
@@ -107,7 +107,7 @@ export async function seedLibrary() {
   const guide: Notebook = {
     id: guideId,
     folderId: null,
-    name: "Hướng dẫn Mtrii Notes",
+    name: "Hướng dẫn sử dụng Sổ Tay",
     favorite: true,
     cover: { color: "#0F766E" },
     defaultPaper: DEFAULT_PAPER,
@@ -192,7 +192,7 @@ async function seedSamplePdf() {
 
   const p1 = pdf.addPage([595.28, 841.89]);
   p1.drawText("Tài liệu mẫu", { font, size: 28, x: 72, y: 760, color: teal });
-  p1.drawText("Mtrii Notes — nhập PDF và viết lên trên", { font, size: 12, x: 72, y: 728, color: mute });
+  p1.drawText("Sổ Tay — nhập PDF và viết lên trên", { font, size: 12, x: 72, y: 728, color: mute });
   const para = [
     "Đây là trang PDF vector, không phải ảnh chụp. Hãy dùng bút đánh dấu",
     "để tô câu này, thêm hộp chữ tiếng Việt, hoặc viết ghi chú bên lề.",
@@ -201,7 +201,7 @@ async function seedSamplePdf() {
     "không làm lệch ghi chú so với nội dung gốc.",
     "",
     "Xuất PDF sẽ gộp lớp ghi chú. Muốn sửa từng nét sau này, hãy xuất",
-    "bản sao .mtriibackup chứ không chỉ file PDF đã gộp.",
+    "bản sao .notesbackup chứ không chỉ file PDF đã gộp.",
   ];
   para.forEach((line, i) => {
     p1.drawText(line, { font, size: 13, x: 72, y: 660 - i * 22, color: ink });

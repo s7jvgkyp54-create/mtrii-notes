@@ -169,7 +169,7 @@ function enqueue(label: string, task: () => Promise<void>) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       useNotesStore.setState({ saveStatus: "error", saveError: message });
-      console.error(`[mtrii] ${label}`, err);
+      console.error(`[notes] ${label}`, err);
     }
   };
   writeChain = writeChain.then(run, run);
@@ -758,8 +758,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const stamp = new Date().toISOString().slice(0, 10);
     const name =
       kind === "notebook"
-        ? `${get().notebooks.find((n) => n.id === notebookId)?.name ?? "so"}-${stamp}.mtriibackup`
-        : `mtrii-notes-${stamp}.mtriibackup`;
+        ? `${get().notebooks.find((n) => n.id === notebookId)?.name ?? "so"}-${stamp}.notesbackup`
+        : `notes-${stamp}.notesbackup`;
     downloadBlob(blob, name);
     const rec = {
       id: nid(),
@@ -790,7 +790,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       await db.putBackup({
         id: nid(),
         createdAt: Date.now(),
-        name: "truoc-thay-the.mtriibackup",
+        name: "truoc-thay-the.notesbackup",
         byteLength: safety.blob.size,
         kind: "manual",
         notebookCount: safety.manifest.notebookCount,
@@ -817,7 +817,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const rec = {
         id: nid(),
         createdAt: Date.now(),
-        name: `auto-${new Date().toISOString().slice(0, 10)}.mtriibackup`,
+        name: `auto-${new Date().toISOString().slice(0, 10)}.notesbackup`,
         byteLength: blob.size,
         kind: "auto" as const,
         notebookCount: manifest.notebookCount,
@@ -833,7 +833,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       set({ backups: list });
       get().persistSettings({ lastBackupAt: Date.now() });
     } catch (err) {
-      console.warn("[mtrii] auto-backup", err);
+      console.warn("[notes] auto-backup", err);
     }
   },
 

@@ -30,7 +30,7 @@ import { cn, formatBytes, relativeVi } from "@/lib/utils";
 import { useNotesStore, visibleNotebooks } from "@/lib/notes/store";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import type { Folder, LibrarySection, Notebook } from "@/lib/notes/types";
-import { MtriiMark } from "./logo";
+import { NotesMark } from "./logo";
 import { NotebookCover } from "./cover";
 import { CreateNotebookDialog } from "./create-dialog";
 
@@ -130,9 +130,9 @@ export function LibraryView() {
         )}
       >
         <div className="flex items-center gap-2.5 px-4 py-4">
-          <MtriiMark className="size-9" />
+          <NotesMark className="size-9" />
           <div>
-            <p className="text-sm font-semibold tracking-tight">Mtrii Notes</p>
+            <p className="text-sm font-semibold tracking-tight">Notes</p>
             <p className="text-[11px] text-subtle">Sổ tay của bạn</p>
           </div>
         </div>
@@ -703,7 +703,7 @@ function EmptyLibrary({
 }) {
   let title = "Chưa có tài liệu nào";
   let desc = "Tạo thư mục để phân loại hoặc tạo sổ mới ngay để bắt đầu viết.";
-  let Icon = MtriiMark;
+  let Icon = NotesMark;
 
   if (isFolder) {
     title = "Thư mục này đang trống";
@@ -722,7 +722,7 @@ function EmptyLibrary({
   return (
     <div className="mx-auto flex max-w-md flex-col items-center py-16 text-center">
       <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/10 text-accent mb-2 shadow-sm">
-        {isFolder ? <FolderOpen className="size-8" /> : <MtriiMark className="size-10" />}
+        {isFolder ? <FolderOpen className="size-8" /> : <NotesMark className="size-10" />}
       </div>
       <h2 className="mt-3 text-lg font-semibold">{title}</h2>
       <p className="mt-1.5 text-xs text-muted max-w-xs">{desc}</p>

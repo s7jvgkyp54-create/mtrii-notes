@@ -80,7 +80,7 @@ fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
     fs::create_dir_all(&assets).map_err(err)?;
     fs::create_dir_all(&backups).map_err(err)?;
     Ok(StoragePaths {
-        database: root.join("mtrii-notes.sqlite3"),
+        database: root.join("notes.sqlite3"),
         root,
         assets,
         backups,
@@ -485,7 +485,7 @@ fn native_list_asset_ids(app: AppHandle) -> Result<Vec<String>, String> {
 fn native_put_backup(app: AppHandle, payload: BackupPayload) -> Result<(), String> {
     safe_id(&payload.meta.id)?;
     let p = paths(&app)?;
-    let file_name = format!("{}.mtriibackup", payload.meta.id);
+    let file_name = format!("{}.notesbackup", payload.meta.id);
     atomic_write(&p.backups.join(&file_name), &payload.bytes)?;
     let connection = connect(&app)?;
     connection
@@ -704,7 +704,7 @@ fn native_install_update(filename: String, bytes: Vec<u8>) -> Result<(), String>
 #[tauri::command]
 fn native_download_and_install_update(url: String) -> Result<(), String> {
     let temp_dir = std::env::temp_dir();
-    let file_path = temp_dir.join("MtriiNotes-Update.exe");
+    let file_path = temp_dir.join("Notes-Update.exe");
     #[cfg(target_os = "windows")]
     {
         let mut cmd = std::process::Command::new("curl.exe");
@@ -778,5 +778,5 @@ pub fn run() {
             native_download_and_install_update,
         ])
         .run(tauri::generate_context!())
-        .expect("Không thể khởi động Mtrii Notes");
+        .expect("Không thể khởi động Notes");
 }

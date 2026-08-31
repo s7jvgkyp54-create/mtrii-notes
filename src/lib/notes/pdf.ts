@@ -25,7 +25,7 @@ export async function loadPdfDocument(assetId: string, data: ArrayBuffer | Uint8
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/password/i.test(msg)) {
-      throw new Error("Tệp PDF có mật khẩu. Mtrii Notes chưa hỗ trợ PDF được bảo vệ.");
+      throw new Error("Tệp PDF có mật khẩu. Ứng dụng chưa hỗ trợ PDF được bảo vệ.");
     }
     throw new Error("Không đọc được PDF. Tệp có thể bị hỏng hoặc chưa được hỗ trợ.");
   }

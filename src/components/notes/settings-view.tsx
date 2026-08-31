@@ -9,7 +9,7 @@ import { APP_ID, APP_NAME, APP_VERSION, BACKUP_FORMAT_VERSION, SCHEMA_VERSION } 
 import { useNotesStore } from "@/lib/notes/store";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import { formatBytes, relativeVi } from "@/lib/utils";
-import { MtriiMark } from "./logo";
+import { NotesMark } from "./logo";
 import type { BackupPreview } from "@/lib/notes/io";
 import { isNativeStorage, openDataFolder } from "@/lib/notes/db";
 import { checkForGithubUpdates, type UpdateCheckResult } from "@/lib/notes/updater";
@@ -161,7 +161,7 @@ export function SettingsView() {
             <input
               ref={fileRef}
               type="file"
-              accept=".mtriibackup,.zip"
+              accept=".notesbackup,.mtriibackup,.zip"
               className="hidden"
               onChange={async (e) => {
                 const f = e.target.files?.[0];
@@ -223,7 +223,7 @@ export function SettingsView() {
         <section>
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted uppercase">Giới thiệu và cập nhật</h2>
           <div className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-4">
-            <MtriiMark className="size-12" />
+            <NotesMark className="size-12" />
             <div>
               <p className="font-semibold">{APP_NAME}</p>
               <p className="text-sm text-muted">
@@ -235,12 +235,12 @@ export function SettingsView() {
           <div className="mt-4 space-y-4">
             <Row
               label="GitHub Repository"
-              hint="Địa chỉ kho mã nguồn GitHub để kiểm tra bản phát hành mới (ví dụ: username/mtrii-notes hoặc link github.com/username/repo)."
+              hint="Địa chỉ kho mã nguồn GitHub để kiểm tra bản phát hành mới (ví dụ: username/repo-name hoặc link github.com/username/repo)."
             >
               <div className="w-64 max-w-full">
                 <Input
                   value={settings.githubRepo || ""}
-                  placeholder="username/mtrii-notes"
+                  placeholder="username/repo-name"
                   onChange={(e) =>
                     useNotesStore.getState().persistSettings({ githubRepo: e.target.value })
                   }

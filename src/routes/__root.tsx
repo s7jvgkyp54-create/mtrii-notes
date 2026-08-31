@@ -6,7 +6,7 @@ import { AppBoot } from "@/components/notes/app-boot";
 import { NotesNavigationProvider, type NotesDestination } from "@/lib/notes/navigation";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "Mtrii Notes";
+const APP_NAME = "Notes";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,7 +15,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: APP_NAME },
       { name: "theme-color", content: "#0F766E" },
-      { name: "description", content: "Sổ tay số Mtrii Notes — viết, nhập PDF, lưu trên máy." },
+      { name: "description", content: "Sổ tay và ghi chú Notes — viết, nhập PDF, lưu trên máy." },
     ],
     links: [
       { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

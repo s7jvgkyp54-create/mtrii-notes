@@ -38,7 +38,7 @@ function DesktopApp() {
 }
 
 const root = document.getElementById("root");
-if (!root) throw new Error("Không tìm thấy điểm khởi động Mtrii Notes.");
+if (!root) throw new Error("Không tìm thấy điểm khởi động Notes.");
 
 createRoot(root).render(
   <StrictMode>

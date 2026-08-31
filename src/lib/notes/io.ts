@@ -15,9 +15,9 @@ import { dumpAll, getAsset } from "./db";
 import { sha256Hex } from "@/lib/utils";
 import { strokeToSvgPath } from "./render";
 
-export const BACKUP_README = `Định dạng Mtrii Notes (.mtriibackup)
+export const BACKUP_README = `Định dạng sao lưu Notes (.notesbackup)
 ====================================
-Đây là định dạng sao lưu của Mtrii Notes (com.mtrii.notes), KHÔNG phải định dạng Goodnotes.
+Đây là định dạng sao lưu của Notes (com.notes.app), KHÔNG phải định dạng Goodnotes.
 
 Cấu trúc gói ZIP:
   MANIFEST.json     Mô tả phiên bản, thời điểm, số sổ/trang
@@ -29,7 +29,7 @@ Cấu trúc gói ZIP:
 formatVersion hiện tại: ${BACKUP_FORMAT_VERSION}
 Ứng dụng: ${APP_NAME} ${APP_VERSION}
 
-Cách dùng: trong Mtrii Notes → Cài đặt → Sao lưu và khôi phục → Nhập bản sao lưu.
+Cách dùng: trong Notes → Cài đặt → Sao lưu và khôi phục → Nhập bản sao lưu.
 Mặc định nhập vào thư viện hiện có (gộp, cấp ID mới) để không ghi đè.
 PDF xuất (gộp ghi chú) không thay thế gói .mtriibackup.
 `;
@@ -353,14 +353,14 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
     }
   }
   const manFile = zip.file("MANIFEST.json");
-  if (!manFile) throw new Error("Thiếu MANIFEST.json — không phải gói Mtrii Notes.");
+  if (!manFile) throw new Error("Thiếu MANIFEST.json — không phải gói Notes.");
   const manifest = JSON.parse(await manFile.async("string")) as BackupPreview["manifest"];
   if (manifest.format !== BACKUP_FORMAT) {
-    throw new Error("Định dạng không phải .mtriibackup của Mtrii Notes.");
+    throw new Error("Định dạng không phải .mtriibackup của Notes.");
   }
   if (manifest.formatVersion > BACKUP_FORMAT_VERSION) {
     throw new Error(
-      `Bản sao lưu (định dạng v${manifest.formatVersion}) mới hơn ứng dụng. Hãy nâng cấp Mtrii Notes rồi nhập lại. Tệp không bị sửa.`,
+      `Bản sao lưu (định dạng v${manifest.formatVersion}) mới hơn ứng dụng. Hãy nâng cấp Notes rồi nhập lại. Tệp không bị sửa.`,
     );
   }
   const checksumsFile = zip.file("checksums.json");

@@ -12,7 +12,7 @@ import type {
 import { DEFAULT_SETTINGS } from "./types";
 import * as desktop from "./desktop-db";
 
-interface MtriiDB extends DBSchema {
+interface NotesDB extends DBSchema {
   folders: { key: string; value: Folder };
   notebooks: { key: string; value: Notebook };
   pages: { key: string; value: PageRecord; indexes: { "by-notebook": string } };
@@ -23,7 +23,7 @@ interface MtriiDB extends DBSchema {
   backups: { key: string; value: BackupRecord };
 }
 
-const DB_NAME = "mtrii-notes";
+const DB_NAME = "notes-app";
 const DB_VERSION = 1;
 
 export interface LibraryDump {
@@ -37,11 +37,11 @@ export interface LibraryDump {
   meta: Record<string, unknown> | undefined;
 }
 
-let dbPromise: Promise<IDBPDatabase<MtriiDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase<NotesDB>> | null = null;
 
 export function getDb() {
   if (!dbPromise) {
-    dbPromise = openDB<MtriiDB>(DB_NAME, DB_VERSION, {
+    dbPromise = openDB<NotesDB>(DB_NAME, DB_VERSION, {
       upgrade(db) {
         db.createObjectStore("folders", { keyPath: "id" });
         db.createObjectStore("notebooks", { keyPath: "id" });

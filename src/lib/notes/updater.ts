@@ -51,7 +51,7 @@ export async function checkForGithubUpdates(
   if (!slug) {
     return {
       ok: false,
-      message: "Chưa cấu hình đường dẫn GitHub Repository (ví dụ: your-username/mtrii-notes).",
+      message: "Chưa cấu hình đường dẫn GitHub Repository (ví dụ: your-username/repo-name).",
     };
   }
 

@@ -1,12 +1,12 @@
 [package]
-name = "mtrii-notes"
-version = "0.2.6"
-description = "Mtrii Notes - so tay so cho Windows"
-authors = ["Mtrii"]
+name = "notes"
+version = "0.3.0"
+description = "Notes - So tay ghi chu cho Windows"
+authors = ["Developer"]
 edition = "2021"
 
 [lib]
-name = "mtrii_notes_lib"
+name = "notes_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
