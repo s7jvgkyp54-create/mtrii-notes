@@ -322,6 +322,10 @@ export function LibraryView() {
                 <FileUp />
                 <span className="hidden sm:inline">Nhập PDF</span>
               </Button>
+              <Button variant="outline" onClick={() => setDriveOpen(true)}>
+                <Cloud />
+                <span className="hidden sm:inline">Nhập Drive</span>
+              </Button>
               <Button onClick={() => setCreateOpen(true)}>
                 <Plus />
                 Tạo mới
@@ -766,6 +770,9 @@ function EmptyLibrary({
           </Button>
           <Button variant="outline" size="sm" onClick={onImport}>
             <FileUp className="size-4" /> Nhập PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setDriveOpen(true)}>
+            <Cloud className="size-4" /> Nhập Drive
           </Button>
         </div>
       ) : null}
