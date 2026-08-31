@@ -60,6 +60,11 @@ export function PageSurface({
   const drawing = useRef(false);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
+  const baseRef = useRef<HTMLCanvasElement>(null);
+  const baseReady = useRef(false);
+  const lastPdfAsset = useRef<string | undefined>(undefined);
+  const lastPage = useRef<number | undefined>(undefined);
+  const lastZoom = useRef<number>(0);
   const [editing, setEditing] = useState<Extract<CanvasObject, { type: "text" }> | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const drag = useRef<{
@@ -100,11 +105,19 @@ export function PageSurface({
     return dpr;
   }, [cssH, cssW]);
 
-  const redrawStatic = useCallback(async () => {
-    const canvas = staticRef.current;
+  // Draw PDF + paper background onto the base canvas (only when pdf/zoom changes)
+  const redrawBase = useCallback(async () => {
+    const canvas = baseRef.current;
     if (!canvas) return;
-    const dpr = sizeCanvases();
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(cssW * dpr));
+    const h = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -133,6 +146,22 @@ export function PageSurface({
         /* render paper only */
       }
     }
+    baseReady.current = true;
+    lastPdfAsset.current = notebook?.pdfAssetId ?? undefined;
+    lastPage.current = page.pdfPage ?? undefined;
+    lastZoom.current = zoom;
+  }, [notebook?.pdfAssetId, page, zoom, cssW, cssH]);
+
+  // Draw just the strokes + selection overlay onto staticRef (very fast, no PDF re-render)
+  const redrawStrokes = useCallback(async () => {
+    const canvas = staticRef.current;
+    if (!canvas) return;
+    const dpr = sizeCanvases();
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    applyPageRotation(ctx, page, zoom, dpr);
 
     try {
       await document.fonts.ready;
@@ -171,11 +200,21 @@ export function PageSurface({
       ctx.strokeRect(box.x, box.y, box.w, box.h);
       ctx.restore();
     }
-  }, [notebook?.pdfAssetId, objects, page, selected, sizeCanvases, zoom]);
+  }, [objects, page, selected, sizeCanvases, zoom]);
 
+  // Re-render base (PDF) only when PDF asset, page, or zoom changes
   useEffect(() => {
-    void redrawStatic();
-  }, [redrawStatic]);
+    const pdfChanged =
+      lastPdfAsset.current !== notebook?.pdfAssetId ||
+      lastPage.current !== page.pdfPage ||
+      Math.abs(lastZoom.current - zoom) > 0.01;
+    if (pdfChanged) void redrawBase();
+  }, [notebook?.pdfAssetId, page.pdfPage, zoom, redrawBase]);
+
+  // Re-render strokes whenever objects/selection change (cheap operation)
+  useEffect(() => {
+    void redrawStrokes();
+  }, [redrawStrokes]);
 
   const setupLive = () => {
     const canvas = liveRef.current;
@@ -369,6 +408,13 @@ export function PageSurface({
     ctx?.clearRect?.(-9999, -9999, 20000, 20000);
     setupLive();
 
+    // Eraser: all intermediate moves were non-undoable; commit once here as a single undo step
+    if (tool.name === "eraser") {
+      const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+      useNotesStore.getState().commitObjects(page.id, current, true);
+      return;
+    }
+
     if (drag.current?.kind === "move") {
       drag.current = null;
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
@@ -443,7 +489,8 @@ export function PageSurface({
         next.push(...erasePartial(o, p, eraserWidth / 2));
       }
     }
-    if (changed) useNotesStore.getState().commitObjects(page.id, next, true);
+    // Apply silently (non-undoable) during move; committed as one undo step on pointer-up
+    if (changed) useNotesStore.getState().commitObjects(page.id, next, false);
   }
 
   useEffect(() => {
@@ -496,6 +543,7 @@ export function PageSurface({
       className="page-shadow relative bg-paper"
       style={{ width: cssW, height: cssH }}
     >
+      <canvas ref={baseRef} className="pointer-events-none absolute top-0 left-0" />
       <canvas ref={staticRef} className="pointer-events-none absolute top-0 left-0" />
       <canvas
         ref={liveRef}
