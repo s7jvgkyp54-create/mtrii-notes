@@ -19,6 +19,7 @@ import {
   X,
   ChevronRight,
   ArrowLeft,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,8 @@ export function LibraryView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderName, setFolderName] = useState("Thư mục mới");
+  const [emptyTrashOpen, setEmptyTrashOpen] = useState(false);
+  const [trashModalNb, setTrashModalNb] = useState<Notebook | null>(null);
   const [dragging, setDragging] = useState(false);
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -263,20 +266,35 @@ export function LibraryView() {
             {selecting ? <X /> : <CheckSquare2 />}
             <span className="hidden sm:inline">{selecting ? "Xong" : "Chọn"}</span>
           </Button>
-          {section === "all" ? (
-            <Button variant="outline" onClick={() => setFolderOpen(true)} className="gap-1.5">
-              <FolderPlus className="size-4" />
-              <span className="hidden sm:inline">Thư mục</span>
+          {section === "trash" ? (
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={items.length === 0}
+              onClick={() => setEmptyTrashOpen(true)}
+              className="gap-1.5"
+            >
+              <Trash2 className="size-4" />
+              <span className="hidden sm:inline">Dọn sạch thùng rác</span>
             </Button>
-          ) : null}
-          <Button variant="outline" onClick={() => fileRef.current?.click()}>
-            <FileUp />
-            <span className="hidden sm:inline">Nhập PDF</span>
-          </Button>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus />
-            Tạo mới
-          </Button>
+          ) : (
+            <>
+              {section === "all" ? (
+                <Button variant="outline" onClick={() => setFolderOpen(true)} className="gap-1.5">
+                  <FolderPlus className="size-4" />
+                  <span className="hidden sm:inline">Thư mục</span>
+                </Button>
+              ) : null}
+              <Button variant="outline" onClick={() => fileRef.current?.click()}>
+                <FileUp />
+                <span className="hidden sm:inline">Nhập PDF</span>
+              </Button>
+              <Button onClick={() => setCreateOpen(true)}>
+                <Plus />
+                Tạo mới
+              </Button>
+            </>
+          )}
           {mounted ? (
             <input
               ref={fileRef}
@@ -359,11 +377,15 @@ export function LibraryView() {
                           notebook={nb}
                           selected={selectedIds.includes(nb.id)}
                           selecting={selecting}
-                          onOpen={() =>
-                            selecting
-                              ? useNotesStore.getState().toggleSelected(nb.id)
-                              : void openNb(nb.id)
-                          }
+                          onOpen={() => {
+                            if (selecting) {
+                              useNotesStore.getState().toggleSelected(nb.id);
+                            } else if (section === "trash") {
+                              setTrashModalNb(nb);
+                            } else {
+                              void openNb(nb.id);
+                            }
+                          }}
                         />
                       ))}
                     </div>
@@ -451,6 +473,77 @@ export function LibraryView() {
           </Button>
         </div>
       </Dialog>
+
+      {/* Empty Trash Dialog */}
+      <Dialog open={emptyTrashOpen} onOpenChange={setEmptyTrashOpen} title="Dọn sạch thùng rác">
+        <p className="text-sm text-muted">
+          Bạn có chắc chắn muốn xóa vĩnh viễn tất cả <strong>{items.length}</strong> sổ tay trong thùng rác không?
+          Thao tác này sẽ giải phóng dung lượng và không thể khôi phục lại.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setEmptyTrashOpen(false)}>
+            Hủy
+          </Button>
+          <Button
+            variant="danger"
+            onClick={async () => {
+              await useNotesStore.getState().emptyTrash();
+              setEmptyTrashOpen(false);
+              toast.success("Đã dọn sạch thùng rác!");
+            }}
+          >
+            Xóa vĩnh viễn tất cả
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* Click Item in Trash Dialog */}
+      {trashModalNb ? (
+        <Dialog
+          open={Boolean(trashModalNb)}
+          onOpenChange={(v) => {
+            if (!v) setTrashModalNb(null);
+          }}
+          title="Tài liệu trong Thùng rác"
+        >
+          <p className="text-sm text-muted">
+            Sổ tay <strong>{trashModalNb.name}</strong> hiện đang nằm trong Thùng rác.
+            Bạn muốn khôi phục sổ này để tiếp tục ghi chép hay xóa vĩnh viễn khỏi máy tính?
+          </p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <Button variant="ghost" onClick={() => setTrashModalNb(null)}>
+              Hủy
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                const id = trashModalNb.id;
+                await useNotesStore.getState().restoreNotebook(id);
+                setTrashModalNb(null);
+                toast.success(`Đã khôi phục ${trashModalNb.name}`);
+                await openNb(id);
+              }}
+              className="gap-1.5"
+            >
+              <RotateCcw className="size-4" />
+              Khôi phục & Mở
+            </Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                const id = trashModalNb.id;
+                await useNotesStore.getState().destroyNotebook(id);
+                setTrashModalNb(null);
+                toast.success(`Đã xóa vĩnh viễn ${trashModalNb.name}`);
+              }}
+              className="gap-1.5"
+            >
+              <Trash2 className="size-4" />
+              Xóa vĩnh viễn
+            </Button>
+          </div>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -673,16 +766,32 @@ function SelectionBar({
     <div className="selection-toolbar fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-surface-2 p-2 text-sm text-fg shadow-xl border border-border">
       <span className="px-2 font-medium tabular-nums">{selectedIds.length} đã chọn</span>
       {section === "trash" ? (
-        <Button
-          size="sm"
-          disabled={disabled}
-          onClick={() => {
-            for (const id of selectedIds) void useNotesStore.getState().restoreNotebook(id);
-            useNotesStore.getState().setSelecting(false);
-          }}
-        >
-          Khôi phục
-        </Button>
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => {
+              for (const id of selectedIds) void useNotesStore.getState().restoreNotebook(id);
+              useNotesStore.getState().setSelecting(false);
+              toast.success(`Đã khôi phục ${selectedIds.length} sổ tay`);
+            }}
+          >
+            <RotateCcw className="size-4" /> Khôi phục
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={disabled}
+            onClick={async () => {
+              for (const id of selectedIds) await useNotesStore.getState().destroyNotebook(id);
+              useNotesStore.getState().setSelecting(false);
+              toast.success(`Đã xóa vĩnh viễn ${selectedIds.length} sổ tay`);
+            }}
+          >
+            <Trash2 className="size-4" /> Xóa vĩnh viễn ({selectedIds.length})
+          </Button>
+        </>
       ) : (
         <>
           <Button
