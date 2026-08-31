@@ -91,6 +91,7 @@ export function PageSurface({
   const wrapRef = useRef<HTMLDivElement>(null);
   const staticRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
+  const renderIdRef = useRef(0);
   const drawing = useRef(false);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
@@ -301,14 +302,9 @@ export function PageSurface({
 
   // Draw just the strokes + selection overlay onto staticRef (very fast, no PDF re-render)
   const redrawStrokes = useCallback(async () => {
+    const renderId = ++renderIdRef.current;
     const canvas = staticRef.current;
     if (!canvas) return;
-    const dpr = sizeCanvases();
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    applyPageRotation(ctx, page, zoom, dpr);
 
     try {
       await document.fonts.ready;
@@ -316,21 +312,41 @@ export function PageSurface({
       /* ignore */
     }
 
+    const loadedImages = new Map<string, HTMLImageElement>();
+    for (const o of objects) {
+      if (o.type === "image") {
+        try {
+          const asset = await getAsset(o.assetId);
+          if (asset) {
+            const img = await loadImage(o.assetId, objectUrlFor(o.assetId, asset.blob));
+            loadedImages.set(o.id, img);
+          }
+        } catch {}
+      }
+    }
+
+    if (renderId !== renderIdRef.current) return;
+
+    const dpr = sizeCanvases();
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    applyPageRotation(ctx, page, zoom, dpr);
+
     for (const o of objects) {
       if (o.type === "stroke") drawStroke(ctx, o);
       else if (o.type === "shape") drawShape(ctx, o);
       else if (o.type === "text") drawText(ctx, o);
       else if (o.type === "image") {
-        try {
-          const asset = await getAsset(o.assetId);
-          if (!asset) continue;
-          const img = await loadImage(o.assetId, objectUrlFor(o.assetId, asset.blob));
+        const img = loadedImages.get(o.id);
+        if (img) {
           ctx.save();
           ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
           ctx.rotate((o.rotation * Math.PI) / 180);
           ctx.drawImage(img, -o.w / 2, -o.h / 2, o.w, o.h);
           ctx.restore();
-        } catch {
+        } else {
           ctx.strokeStyle = "#b42318";
           ctx.strokeRect(o.x, o.y, o.w, o.h);
         }
