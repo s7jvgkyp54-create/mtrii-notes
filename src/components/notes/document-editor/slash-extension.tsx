@@ -4,7 +4,7 @@ import tippy, { type Instance as TippyInstance } from "tippy.js";
 import type { Editor, Range } from "@tiptap/core";
 import { ReactRenderer } from "@tiptap/react";
 import React, { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import { Heading1, Heading2, List, ListOrdered, Quote, Code } from "lucide-react";
+import { Heading1, Heading2, List, ListOrdered, Quote, Code, CheckSquare, TableProperties } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CommandItem {
@@ -16,6 +16,22 @@ interface CommandItem {
 
 const getSuggestionItems = ({ query }: { query: string }): CommandItem[] => {
   const items: CommandItem[] = [
+    {
+      title: "To-do List",
+      description: "Danh sách công việc",
+      icon: <CheckSquare className="w-4 h-4" />,
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).toggleTaskList().run();
+      },
+    },
+    {
+      title: "Table",
+      description: "Tạo bảng 3x3",
+      icon: <TableProperties className="w-4 h-4" />,
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+      },
+    },
     {
       title: "Heading 1",
       description: "Tiêu đề lớn",

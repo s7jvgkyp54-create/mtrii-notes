@@ -15,8 +15,13 @@ import { all, createLowlight } from "lowlight";
 import { MathExtension } from "@aarkue/tiptap-math-extension";
 import Link from "@tiptap/extension-link";
 import Dropcursor from "@tiptap/extension-dropcursor";
-// @ts-expect-error: no type declaration for this module
 import GlobalDragHandle from "tiptap-extension-global-drag-handle";
+import { TaskList } from "@tiptap/extension-task-list";
+import { TaskItem } from "@tiptap/extension-task-item";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
 import { WikilinkExtension, wikilinkSuggestion } from "./wikilink-extension";
 import { NotesImageExtension } from "./image-extension";
 import { putAsset } from "@/lib/notes/db";
@@ -90,6 +95,16 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
         dragHandleWidth: 20,
         scrollTreshold: 100,
       }),
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
       NotesImageExtension,
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
