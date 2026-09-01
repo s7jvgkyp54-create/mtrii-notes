@@ -131,11 +131,25 @@ export function PageSurface({
     clientY: number;
     shiftKey: boolean;
   } | null>(null);
-  const drag = useRef<{
-    kind: "move" | "lasso";
-    last: Pt;
-    ids: string[];
-  } | null>(null);
+  const loadedImagesRef = useRef(new Map<string, HTMLImageElement>());
+  const drag = useRef<
+    | {
+        kind: "move";
+        last: Pt;
+        ids: string[];
+        totalDx: number;
+        totalDy: number;
+        ghostEl?: HTMLCanvasElement;
+        ghostOffsetX: number;
+        ghostOffsetY: number;
+      }
+    | {
+        kind: "lasso";
+        last: Pt;
+        ids: string[];
+      }
+    | null
+  >(null);
 
   const [isVisible, setIsVisible] = useState(active);
 
@@ -290,7 +304,7 @@ export function PageSurface({
   }, [cssH, cssW]);
 
   // Draw PDF + paper background onto the base canvas (only when pdf/zoom changes)
-  const redrawBase = useCallback(async () => {
+  const redrawBase = useCallback(async (signal?: AbortSignal) => {
     if (!isVisible) return;
     const canvas = baseRef.current;
     if (!canvas) return;
@@ -318,7 +332,9 @@ export function PageSurface({
           zoom * dpr,
           page.rotation,
           notebook.pdfAssetId,
+          signal,
         );
+        if (signal?.aborted) return;
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
@@ -348,11 +364,10 @@ export function PageSurface({
     }
 
     const targetObjects = overrideObjects ?? objects;
-    const loadedImages = new Map<string, HTMLImageElement>();
     for (const o of targetObjects) {
-      if (o.type === "image") {
+      if (o.type === "image" && !loadedImagesRef.current.has(o.id)) {
         try {
-          loadedImages.set(o.id, await loadAssetImage(o.assetId));
+          loadedImagesRef.current.set(o.id, await loadAssetImage(o.assetId));
         } catch {
           // Keep rendering the rest of the page if one embedded image is unavailable.
         }
@@ -373,7 +388,7 @@ export function PageSurface({
       else if (o.type === "shape") drawShape(ctx, o);
       else if (o.type === "text") drawText(ctx, o);
       else if (o.type === "image") {
-        const img = loadedImages.get(o.id);
+        const img = loadedImagesRef.current.get(o.id);
         if (img) {
           ctx.save();
           ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
@@ -402,11 +417,13 @@ export function PageSurface({
   // Re-render base (PDF) only when PDF asset, page, or zoom changes
   useEffect(() => {
     if (!isVisible) return;
+    const ac = new AbortController();
     const pdfChanged =
       lastPdfAsset.current !== notebook?.pdfAssetId ||
       lastPage.current !== page.pdfPage ||
       Math.abs(lastZoom.current - zoom) > 0.01;
-    if (pdfChanged) void redrawBase();
+    if (pdfChanged) void redrawBase(ac.signal);
+    return () => ac.abort();
   }, [notebook?.pdfAssetId, page.pdfPage, zoom, redrawBase, isVisible]);
 
   // Re-render strokes whenever objects/selection change (cheap operation)
@@ -595,15 +612,86 @@ export function PageSurface({
 
     if (tool.name === "lasso") {
       const hit = [...objects].reverse().find((o) => hitTest(o, p, 6));
-      if (hit && selected.includes(hit.id)) {
-        drag.current = { kind: "move", last: p, ids: selected };
+      
+      const startDragSession = (ids: string[]) => {
+        const selObjects = objects.filter((o) => ids.includes(o.id));
+        const box = unionBBox(selObjects);
+        let ghostEl: HTMLCanvasElement | undefined;
+        let ghostOffsetX = 0;
+        let ghostOffsetY = 0;
+
+        if (box) {
+          const padding = 20;
+          const dpr = sizeCanvases();
+          ghostEl = document.createElement("canvas");
+          ghostEl.id = "vanilla-drag-ghost";
+          ghostEl.width = (box.w + padding * 2) * zoom * dpr;
+          ghostEl.height = (box.h + padding * 2) * zoom * dpr;
+          ghostEl.style.position = "fixed";
+          ghostEl.style.pointerEvents = "none";
+          ghostEl.style.zIndex = "99999";
+          ghostEl.style.transformOrigin = "top left";
+          ghostEl.style.width = `${(box.w + padding * 2) * zoom}px`;
+          ghostEl.style.height = `${(box.h + padding * 2) * zoom}px`;
+          
+          const ctx = ghostEl.getContext("2d");
+          if (ctx) {
+            ctx.scale(zoom * dpr, zoom * dpr);
+            ctx.translate(-box.x + padding, -box.y + padding);
+            
+            for (const o of selObjects) {
+              if (o.type === "stroke") drawStroke(ctx, o);
+              else if (o.type === "shape") drawShape(ctx, o);
+              else if (o.type === "text") drawText(ctx, o);
+              else if (o.type === "image") {
+                const img = loadedImagesRef.current.get(o.id);
+                if (img) {
+                  ctx.save();
+                  ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
+                  ctx.rotate((o.rotation * Math.PI) / 180);
+                  ctx.drawImage(img, -o.w / 2, -o.h / 2, o.w, o.h);
+                  ctx.restore();
+                } else {
+                  ctx.strokeStyle = "#b42318";
+                  ctx.strokeRect(o.x, o.y, o.w, o.h);
+                }
+              }
+            }
+          }
+          
+          document.body.appendChild(ghostEl);
+          const canvasRect = liveRef.current!.getBoundingClientRect();
+          const ghostScreenX = canvasRect.left + (box.x - padding) * zoom;
+          const ghostScreenY = canvasRect.top + (box.y - padding) * zoom;
+          
+          ghostOffsetX = ev.clientX - ghostScreenX;
+          ghostOffsetY = ev.clientY - ghostScreenY;
+          ghostEl.style.transform = `translate(${ghostScreenX}px, ${ghostScreenY}px)`;
+        }
+
+        drag.current = { 
+          kind: "move", 
+          last: p, 
+          ids, 
+          totalDx: 0, 
+          totalDy: 0,
+          ghostEl,
+          ghostOffsetX,
+          ghostOffsetY
+        };
         drawing.current = true;
+        
+        const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
+        scheduleLocalObjects(current.filter(o => !ids.includes(o.id)));
+      };
+
+      if (hit && selected.includes(hit.id)) {
+        startDragSession(selected);
         return;
       }
       if (hit) {
         setSelected([hit.id]);
-        drag.current = { kind: "move", last: p, ids: [hit.id] };
-        drawing.current = true;
+        startDragSession([hit.id]);
         return;
       }
       drawing.current = true;
@@ -646,13 +734,15 @@ export function PageSurface({
       if (drag.current?.kind === "move") {
         const dx = p.x - drag.current.last.x;
         const dy = p.y - drag.current.last.y;
+        drag.current.totalDx += dx;
+        drag.current.totalDy += dy;
         drag.current.last = p;
-        const ids = new Set(drag.current.ids);
-        const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
-        const next = current.map((o) =>
-          ids.has(o.id) ? translateObject(o, dx, dy) : o,
-        );
-        scheduleLocalObjects(next);
+        
+        if (drag.current.ghostEl) {
+          const x = e.clientX - drag.current.ghostOffsetX;
+          const y = e.clientY - drag.current.ghostOffsetY;
+          drag.current.ghostEl.style.transform = `translate(${x}px, ${y}px)`;
+        }
         continue;
       }
       if (drag.current?.kind === "lasso" || isPen(tool.name) || isShape(tool.name)) {
@@ -688,9 +778,16 @@ export function PageSurface({
 
     if (drag.current?.kind === "move") {
       const draggedIds = new Set(drag.current.ids);
+      const totalDx = drag.current.totalDx;
+      const totalDy = drag.current.totalDy;
+      
+      if (drag.current.ghostEl) {
+        drag.current.ghostEl.remove();
+      }
+      
       drag.current = null;
       
-      const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
+      const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
       let targetPageId = page.id;
       let targetRect: DOMRect | null = null;
       
@@ -710,45 +807,22 @@ export function PageSurface({
         }
       }
 
+      let dx = totalDx;
+      let dy = totalDy;
       if (targetPageId !== page.id && targetRect) {
-        // Xử lý chuyển đối tượng sang trang mới (re-parenting)
         const currentRect = liveRef.current!.getBoundingClientRect();
-        
-        const keptObjects = current.filter(o => !draggedIds.has(o.id));
-        const movedObjects = current.filter(o => draggedIds.has(o.id)).map(o => {
-          if (o.type === 'image' || o.type === 'text') {
-            const screenX = currentRect.left + o.x * zoom;
-            const screenY = currentRect.top + o.y * zoom;
-            return {
-              ...o,
-              x: (screenX - targetRect!.left) / zoom,
-              y: (screenY - targetRect!.top) / zoom
-            };
-          } else if (o.type === 'shape') {
-             const screenX1 = currentRect.left + o.x1 * zoom;
-             const screenY1 = currentRect.top + o.y1 * zoom;
-             const screenX2 = currentRect.left + o.x2 * zoom;
-             const screenY2 = currentRect.top + o.y2 * zoom;
-             return {
-                ...o,
-                x1: (screenX1 - targetRect!.left) / zoom,
-                y1: (screenY1 - targetRect!.top) / zoom,
-                x2: (screenX2 - targetRect!.left) / zoom,
-                y2: (screenY2 - targetRect!.top) / zoom
-             };
-          } else if (o.type === 'stroke') {
-             return {
-                ...o,
-                points: o.points.map(p => ({
-                   ...p,
-                   x: ((currentRect.left + p.x * zoom) - targetRect!.left) / zoom,
-                   y: ((currentRect.top + p.y * zoom) - targetRect!.top) / zoom
-                }))
-             };
-          }
-          return o;
-        });
+        dx += (currentRect.left - targetRect.left) / zoom;
+        dy += (currentRect.top - targetRect.top) / zoom;
+      }
 
+      const next = current.map((o) =>
+        draggedIds.has(o.id) ? translateObject(o, dx, dy) : o,
+      );
+
+      if (targetPageId !== page.id && targetRect) {
+        const keptObjects = next.filter(o => !draggedIds.has(o.id));
+        const movedObjects = next.filter(o => draggedIds.has(o.id));
+        
         useNotesStore.getState().commitObjects(page.id, keptObjects, true, strokeBeforeState.current ?? undefined);
         
         const targetCurrentObjects = useNotesStore.getState().objectsByPage[targetPageId] ?? [];
@@ -759,7 +833,7 @@ export function PageSurface({
       } else {
         useNotesStore
           .getState()
-          .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+          .commitObjects(page.id, next, true, strokeBeforeState.current ?? undefined);
       }
       strokeBeforeState.current = null;
       return;
@@ -1110,17 +1184,21 @@ export function PageSurface({
       }}
       onDrop={onDrop}
     >
-      <canvas ref={baseRef} className="pointer-events-none absolute top-0 left-0" />
-      <canvas ref={staticRef} className="pointer-events-none absolute top-0 left-0" />
-      <canvas
-        ref={liveRef}
-        className="absolute top-0 left-0 touch-none"
-        style={{ width: cssW, height: cssH }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-      />
+      {isVisible ? (
+        <>
+          <canvas ref={baseRef} className="pointer-events-none absolute top-0 left-0" />
+          <canvas ref={staticRef} className="pointer-events-none absolute top-0 left-0" />
+          <canvas
+            ref={liveRef}
+            className="absolute top-0 left-0 touch-none"
+            style={{ width: cssW, height: cssH }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+          />
+        </>
+      ) : null}
       {dropActive ? (
         <div className="pointer-events-none absolute inset-3 z-40 grid place-items-center rounded-xl border-2 border-dashed border-accent bg-surface-2/90 text-accent">
           <div className="flex flex-col items-center gap-2 px-6 text-center">

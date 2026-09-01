@@ -111,6 +111,7 @@ export async function renderPdfPageBitmap(
   scale: number,
   rotation: number,
   cacheKey: string,
+  signal?: AbortSignal,
 ): Promise<ImageBitmap> {
   const bucket = scaleBucket(scale);
   const key = `${cacheKey}:${pageNumber}:${bucket}:${rotation}`;
@@ -131,7 +132,14 @@ export async function renderPdfPageBitmap(
     canvas.height = Math.ceil(viewport.height);
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Không tạo được canvas để render PDF.");
-    await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+    const renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+    const onAbort = () => renderTask.cancel();
+    if (signal) signal.addEventListener("abort", onAbort);
+    try {
+      await renderTask.promise;
+    } finally {
+      if (signal) signal.removeEventListener("abort", onAbort);
+    }
     const bmp = await createImageBitmap(canvas);
     const pixels = bmp.width * bmp.height;
     pageBmp.set(key, { bmp, pixels });

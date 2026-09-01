@@ -64,16 +64,13 @@ async function drawObjectsOnPdfPage(
         pdfPage.drawSvgPath(path, {
           x: 0,
           y: pageH,
-          color: undefined,
-          borderColor: hexRgb(o.color),
-          borderWidth: o.width,
-          borderOpacity:
+          color: hexRgb(o.color),
+          opacity:
             o.tool === "highlighter"
               ? 0.38
               : o.tool === "pencil"
                 ? 0.78
                 : 1,
-          borderLineCap: o.tool === "highlighter" ? LineCapStyle.Butt : LineCapStyle.Round,
           blendMode:
             o.tool === "highlighter"
               ? BlendMode.Multiply
@@ -161,6 +158,54 @@ async function drawObjectsOnPdfPage(
         });
       } catch {
         // Skip a single unreadable image while preserving the rest of the export.
+      }
+    } else if (o.type === "shape") {
+      const color = hexRgb(o.color);
+      if (o.shape === "rect") {
+        pdfPage.drawRectangle({
+          x: Math.min(o.x1, o.x2),
+          y: pageH - Math.max(o.y1, o.y2),
+          width: Math.abs(o.x2 - o.x1),
+          height: Math.abs(o.y2 - o.y1),
+          borderColor: color,
+          borderWidth: o.width,
+        });
+      } else if (o.shape === "ellipse") {
+        pdfPage.drawEllipse({
+          x: Math.min(o.x1, o.x2) + Math.abs(o.x2 - o.x1) / 2,
+          y: pageH - Math.max(o.y1, o.y2) + Math.abs(o.y2 - o.y1) / 2,
+          xScale: Math.abs(o.x2 - o.x1) / 2,
+          yScale: Math.abs(o.y2 - o.y1) / 2,
+          borderColor: color,
+          borderWidth: o.width,
+        });
+      } else if (o.shape === "line" || o.shape === "arrow") {
+        pdfPage.drawLine({
+          start: { x: o.x1, y: pageH - o.y1 },
+          end: { x: o.x2, y: pageH - o.y2 },
+          color,
+          thickness: o.width,
+        });
+        if (o.shape === "arrow") {
+          const ang = Math.atan2(o.y2 - o.y1, o.x2 - o.x1);
+          const len = Math.max(10, o.width * 3.2);
+          const h1x = o.x2 - len * Math.cos(ang - 0.4);
+          const h1y = o.y2 - len * Math.sin(ang - 0.4);
+          const h2x = o.x2 - len * Math.cos(ang + 0.4);
+          const h2y = o.y2 - len * Math.sin(ang + 0.4);
+          pdfPage.drawLine({
+            start: { x: o.x2, y: pageH - o.y2 },
+            end: { x: h1x, y: pageH - h1y },
+            color,
+            thickness: o.width,
+          });
+          pdfPage.drawLine({
+            start: { x: o.x2, y: pageH - o.y2 },
+            end: { x: h2x, y: pageH - h2y },
+            color,
+            thickness: o.width,
+          });
+        }
       }
     }
   }
