@@ -180,7 +180,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
   return (
     <TooltipProvider>
       <div className="flex h-svh flex-col bg-desk text-fg">
-        <header className="flex items-center gap-2 border-b border-border bg-surface px-2 py-1.5">
+        <header className="flex items-center gap-2 border-b border-border bg-surface px-2 py-1.5 print:hidden">
           <Button
             variant="ghost"
             size="sm"

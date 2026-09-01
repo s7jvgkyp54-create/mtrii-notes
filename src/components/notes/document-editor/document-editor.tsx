@@ -22,6 +22,7 @@ import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
+import { Markdown } from "tiptap-markdown";
 import { WikilinkExtension, wikilinkSuggestion } from "./wikilink-extension";
 import { NotesImageExtension } from "./image-extension";
 import { putAsset } from "@/lib/notes/db";
@@ -106,6 +107,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
       TableHeader,
       TableCell,
       NotesImageExtension,
+      Markdown,
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
     autofocus: false,

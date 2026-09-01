@@ -91,3 +91,21 @@ ul[data-type="taskList"] li[data-checked="true"] > div > p {
   cursor: ew-resize;
   cursor: col-resize;
 }
+
+@media print {
+  .ProseMirror {
+    padding: 0 !important;
+    min-height: auto !important;
+  }
+  
+  /* Hide drag handle */
+  .global-drag-handle {
+    display: none !important;
+  }
+
+  /* Adjust background to white and text to black for better printing */
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+}
