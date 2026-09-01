@@ -4,6 +4,8 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 
 import { EditorToolbar } from "./editor-toolbar";
+import { BubbleMenu } from "./bubble-menu";
+import { SlashCommands, slashSuggestion } from "./slash-extension";
 import { getDocument } from "@/lib/notes/db";
 import { normalizeDocumentContent } from "@/lib/notes/document-content";
 import { scheduleSaveDocument, flushSaveDocument } from "@/lib/notes/document-save";
@@ -22,6 +24,9 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
       StarterKit,
       Placeholder.configure({
         placeholder: "Gõ '/' để mở menu lệnh, hoặc bắt đầu viết...",
+      }),
+      SlashCommands.configure({
+        suggestion: slashSuggestion,
       }),
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
@@ -73,6 +78,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
   return (
     <div className="flex flex-col h-full w-full bg-background overflow-hidden">
       <EditorToolbar editor={editor} noteId={noteId} />
+      <BubbleMenu editor={editor} />
       <div className="flex-1 overflow-y-auto w-full relative">
         <div className="max-w-[850px] mx-auto bg-background min-h-full">
           {loading ? (
