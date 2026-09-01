@@ -139,6 +139,9 @@ export function PageSurface({
         ids: string[];
         totalDx: number;
         totalDy: number;
+        active: boolean;
+        startClientX: number;
+        startClientY: number;
         ghostEl?: HTMLCanvasElement;
         ghostOffsetX: number;
         ghostOffsetY: number;
@@ -612,77 +615,21 @@ export function PageSurface({
 
     if (tool.name === "lasso") {
       const hit = [...objects].reverse().find((o) => hitTest(o, p, 6));
-      
+
       const startDragSession = (ids: string[]) => {
-        const selObjects = objects.filter((o) => ids.includes(o.id));
-        const box = unionBBox(selObjects);
-        let ghostEl: HTMLCanvasElement | undefined;
-        let ghostOffsetX = 0;
-        let ghostOffsetY = 0;
-
-        if (box) {
-          const padding = 20;
-          const dpr = sizeCanvases();
-          ghostEl = document.createElement("canvas");
-          ghostEl.id = "vanilla-drag-ghost";
-          ghostEl.width = (box.w + padding * 2) * zoom * dpr;
-          ghostEl.height = (box.h + padding * 2) * zoom * dpr;
-          ghostEl.style.position = "fixed";
-          ghostEl.style.pointerEvents = "none";
-          ghostEl.style.zIndex = "99999";
-          ghostEl.style.transformOrigin = "top left";
-          ghostEl.style.width = `${(box.w + padding * 2) * zoom}px`;
-          ghostEl.style.height = `${(box.h + padding * 2) * zoom}px`;
-          
-          const ctx = ghostEl.getContext("2d");
-          if (ctx) {
-            ctx.scale(zoom * dpr, zoom * dpr);
-            ctx.translate(-box.x + padding, -box.y + padding);
-            
-            for (const o of selObjects) {
-              if (o.type === "stroke") drawStroke(ctx, o);
-              else if (o.type === "shape") drawShape(ctx, o);
-              else if (o.type === "text") drawText(ctx, o);
-              else if (o.type === "image") {
-                const img = loadedImagesRef.current.get(o.id);
-                if (img) {
-                  ctx.save();
-                  ctx.translate(o.x + o.w / 2, o.y + o.h / 2);
-                  ctx.rotate((o.rotation * Math.PI) / 180);
-                  ctx.drawImage(img, -o.w / 2, -o.h / 2, o.w, o.h);
-                  ctx.restore();
-                } else {
-                  ctx.strokeStyle = "#b42318";
-                  ctx.strokeRect(o.x, o.y, o.w, o.h);
-                }
-              }
-            }
-          }
-          
-          document.body.appendChild(ghostEl);
-          const canvasRect = liveRef.current!.getBoundingClientRect();
-          const ghostScreenX = canvasRect.left + (box.x - padding) * zoom;
-          const ghostScreenY = canvasRect.top + (box.y - padding) * zoom;
-          
-          ghostOffsetX = ev.clientX - ghostScreenX;
-          ghostOffsetY = ev.clientY - ghostScreenY;
-          ghostEl.style.transform = `translate(${ghostScreenX}px, ${ghostScreenY}px)`;
-        }
-
-        drag.current = { 
-          kind: "move", 
-          last: p, 
-          ids, 
-          totalDx: 0, 
+        drag.current = {
+          kind: "move",
+          last: p,
+          ids,
+          totalDx: 0,
           totalDy: 0,
-          ghostEl,
-          ghostOffsetX,
-          ghostOffsetY
+          active: false,
+          startClientX: ev.clientX,
+          startClientY: ev.clientY,
+          ghostOffsetX: 0,
+          ghostOffsetY: 0,
         };
         drawing.current = true;
-        
-        const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
-        scheduleLocalObjects(current.filter(o => !ids.includes(o.id)));
       };
 
       if (hit && selected.includes(hit.id)) {
@@ -732,16 +679,43 @@ export function PageSurface({
         continue;
       }
       if (drag.current?.kind === "move") {
-        const dx = p.x - drag.current.last.x;
-        const dy = p.y - drag.current.last.y;
-        drag.current.totalDx += dx;
-        drag.current.totalDy += dy;
-        drag.current.last = p;
-        
-        if (drag.current.ghostEl) {
-          const x = e.clientX - drag.current.ghostOffsetX;
-          const y = e.clientY - drag.current.ghostOffsetY;
-          drag.current.ghostEl.style.transform = `translate(${x}px, ${y}px)`;
+        const session = drag.current;
+        const dx = p.x - session.last.x;
+        const dy = p.y - session.last.y;
+        session.totalDx += dx;
+        session.totalDy += dy;
+        session.last = p;
+
+        if (!session.active) {
+          const travelled = Math.hypot(
+            e.clientX - session.startClientX,
+            e.clientY - session.startClientY,
+          );
+          if (travelled < DRAG_ACTIVATION_DISTANCE) continue;
+
+          const ghost = createMoveGhost(
+            objects,
+            session.ids,
+            session.startClientX,
+            session.startClientY,
+            liveRef.current,
+            loadedImagesRef.current,
+            zoom,
+            sizeCanvases(),
+          );
+          session.active = true;
+          session.ghostEl = ghost?.element;
+          session.ghostOffsetX = ghost?.offsetX ?? 0;
+          session.ghostOffsetY = ghost?.offsetY ?? 0;
+
+          const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+          scheduleLocalObjects(current.filter((object) => !session.ids.includes(object.id)));
+        }
+
+        if (session.ghostEl) {
+          const x = e.clientX - session.ghostOffsetX;
+          const y = e.clientY - session.ghostOffsetY;
+          session.ghostEl.style.transform = `translate3d(${x}px, ${y}px, 0)`;
         }
         continue;
       }
@@ -777,16 +751,22 @@ export function PageSurface({
     }
 
     if (drag.current?.kind === "move") {
-      const draggedIds = new Set(drag.current.ids);
-      const totalDx = drag.current.totalDx;
-      const totalDy = drag.current.totalDy;
-      
-      if (drag.current.ghostEl) {
-        drag.current.ghostEl.remove();
-      }
-      
+      const session = drag.current;
+      const draggedIds = new Set(session.ids);
+      const totalDx = session.totalDx;
+      const totalDy = session.totalDy;
+
+      session.ghostEl?.remove();
       drag.current = null;
-      
+      updateLocalObjects(null);
+
+      // A normal click only selects the object. It must not hide, move, save,
+      // or add a redundant undo entry.
+      if (!session.active) {
+        strokeBeforeState.current = null;
+        return;
+      }
+
       const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
       let targetPageId = page.id;
       let targetRect: DOMRect | null = null;
@@ -886,6 +866,19 @@ export function PageSurface({
       commit([...objects, stroke]);
       pts.current = [];
     }
+  }
+
+  function onPointerCancel(ev: React.PointerEvent<HTMLCanvasElement>) {
+    if (drag.current?.kind !== "move") {
+      onPointerUp(ev);
+      return;
+    }
+
+    drawing.current = false;
+    drag.current.ghostEl?.remove();
+    drag.current = null;
+    strokeBeforeState.current = null;
+    updateLocalObjects(null);
   }
 
   function applyEraser(p: Pt) {
@@ -1012,6 +1005,7 @@ export function PageSurface({
       if (localFrameRef.current !== null) window.cancelAnimationFrame(localFrameRef.current);
       if (resizeFrameRef.current !== null) window.cancelAnimationFrame(resizeFrameRef.current);
       if (textSaveTimer.current !== null) clearTimeout(textSaveTimer.current);
+      if (drag.current?.kind === "move") drag.current.ghostEl?.remove();
     },
     [],
   );
@@ -1195,7 +1189,7 @@ export function PageSurface({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
+            onPointerCancel={onPointerCancel}
           />
         </>
       ) : null}
@@ -1523,6 +1517,79 @@ export function PageSurface({
 }
 
 const EMPTY: CanvasObject[] = [];
+const DRAG_ACTIVATION_DISTANCE = 4;
+
+function createMoveGhost(
+  objects: CanvasObject[],
+  ids: string[],
+  startClientX: number,
+  startClientY: number,
+  sourceCanvas: HTMLCanvasElement | null,
+  loadedImages: Map<string, HTMLImageElement>,
+  zoom: number,
+  dpr: number,
+) {
+  if (!sourceCanvas) return null;
+
+  const selectedObjects = objects.filter((object) => ids.includes(object.id));
+  const box = unionBBox(selectedObjects);
+  if (!box) return null;
+
+  const padding = 20;
+  const cssWidth = (box.w + padding * 2) * zoom;
+  const cssHeight = (box.h + padding * 2) * zoom;
+  const element = document.createElement("canvas");
+  element.id = "vanilla-drag-ghost";
+  element.width = Math.max(1, Math.round(cssWidth * dpr));
+  element.height = Math.max(1, Math.round(cssHeight * dpr));
+  element.style.position = "fixed";
+  element.style.top = "0";
+  element.style.left = "0";
+  element.style.width = `${cssWidth}px`;
+  element.style.height = `${cssHeight}px`;
+  element.style.pointerEvents = "none";
+  element.style.zIndex = "99999";
+  element.style.opacity = "0";
+  element.style.transformOrigin = "top left";
+  element.style.transition = "opacity 120ms cubic-bezier(0.2, 0, 0, 1)";
+  element.style.willChange = "transform, opacity";
+
+  const context = element.getContext("2d");
+  if (context) {
+    context.scale(zoom * dpr, zoom * dpr);
+    context.translate(-box.x + padding, -box.y + padding);
+
+    for (const object of selectedObjects) {
+      if (object.type === "stroke") drawStroke(context, object);
+      else if (object.type === "shape") drawShape(context, object);
+      else if (object.type === "text") drawText(context, object);
+      else if (object.type === "image") {
+        const image = loadedImages.get(object.id);
+        if (!image) continue;
+        context.save();
+        context.translate(object.x + object.w / 2, object.y + object.h / 2);
+        context.rotate((object.rotation * Math.PI) / 180);
+        context.drawImage(image, -object.w / 2, -object.h / 2, object.w, object.h);
+        context.restore();
+      }
+    }
+  }
+
+  const canvasRect = sourceCanvas.getBoundingClientRect();
+  const ghostScreenX = canvasRect.left + (box.x - padding) * zoom;
+  const ghostScreenY = canvasRect.top + (box.y - padding) * zoom;
+  element.style.transform = `translate3d(${ghostScreenX}px, ${ghostScreenY}px, 0)`;
+  document.body.appendChild(element);
+  window.requestAnimationFrame(() => {
+    if (element.isConnected) element.style.opacity = "0.98";
+  });
+
+  return {
+    element,
+    offsetX: startClientX - ghostScreenX,
+    offsetY: startClientY - ghostScreenY,
+  };
+}
 
 function isPen(t: ToolName) {
   return t === "ballpoint" || t === "fountain" || t === "pencil" || t === "highlighter";
