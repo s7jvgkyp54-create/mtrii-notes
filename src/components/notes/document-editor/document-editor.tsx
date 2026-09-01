@@ -14,7 +14,13 @@ import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { all, createLowlight } from "lowlight";
 import { MathExtension } from "@aarkue/tiptap-math-extension";
 import Link from "@tiptap/extension-link";
+import Dropcursor from "@tiptap/extension-dropcursor";
+// @ts-expect-error: no type declaration for this module
+import GlobalDragHandle from "tiptap-extension-global-drag-handle";
 import { WikilinkExtension, wikilinkSuggestion } from "./wikilink-extension";
+import { NotesImageExtension } from "./image-extension";
+import { putAsset } from "@/lib/notes/db";
+import { nid } from "@/lib/utils";
 
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
@@ -29,6 +35,28 @@ interface DocumentEditorProps {
 export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
   const [loading, setLoading] = useState(true);
   const currentNoteId = useRef(noteId);
+
+  const handleImageFile = async (file: File, view: any, pos: number) => {
+    try {
+      const id = nid();
+      await putAsset({
+        id,
+        kind: "image",
+        mime: file.type,
+        name: file.name,
+        byteLength: file.size,
+        blob: file,
+        createdAt: Date.now(),
+      });
+      const node = view.state.schema.nodes.image.create({ src: `asset-id:${id}` });
+      const tr = view.state.tr.insert(pos, node);
+      view.dispatch(tr);
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  };
 
   const editor = useEditor({
     extensions: [
@@ -45,7 +73,7 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
         lowlight,
       }),
       MathExtension.configure({
-        evaluation: false, // Set to true if you want it to evaluate math expressions too
+        evaluation: false,
       }),
       Link.configure({
         openOnClick: true,
@@ -54,9 +82,43 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
       WikilinkExtension.configure({
         suggestion: wikilinkSuggestion,
       }),
+      Dropcursor.configure({
+        color: 'var(--accent)',
+        width: 2,
+      }),
+      GlobalDragHandle.configure({
+        dragHandleWidth: 20,
+        scrollTreshold: 100,
+      }),
+      NotesImageExtension,
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
     autofocus: false,
+    editorProps: {
+      handleDrop: function(view, event, slice, moved) {
+        if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+          const file = event.dataTransfer.files[0];
+          if (file && file.type.startsWith("image/")) {
+            const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+            if (coordinates) {
+              void handleImageFile(file, view, coordinates.pos);
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+      handlePaste: function(view, event, slice) {
+        if (event.clipboardData && event.clipboardData.files && event.clipboardData.files.length > 0) {
+          const file = event.clipboardData.files[0];
+          if (file && file.type.startsWith("image/")) {
+            void handleImageFile(file, view, view.state.selection.from);
+            return true;
+          }
+        }
+        return false;
+      }
+    },
     onUpdate: ({ editor }) => {
       // Don't save if we are loading or switching notes
       if (loading) return;
