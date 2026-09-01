@@ -1,6 +1,10 @@
 export const APP_NAME = "Notes";
 export const APP_ID = "com.mtrii.notes";
-export const APP_VERSION = "0.5.9";
+// __APP_VERSION__ is injected at build time by Vite from package.json.
+// Never hardcode this string — bump package.json only (npm version patch).
+declare const __APP_VERSION__: string;
+export const APP_VERSION: string =
+  typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "0.5.9";
 export const SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = "notesbackup";
 export const BACKUP_FORMAT_VERSION = 1;
