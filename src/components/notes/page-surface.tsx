@@ -142,9 +142,6 @@ export function PageSurface({
         active: boolean;
         startClientX: number;
         startClientY: number;
-        ghostEl?: HTMLCanvasElement;
-        ghostOffsetX: number;
-        ghostOffsetY: number;
       }
     | {
         kind: "lasso";
@@ -626,8 +623,6 @@ export function PageSurface({
           active: false,
           startClientX: ev.clientX,
           startClientY: ev.clientY,
-          ghostOffsetX: 0,
-          ghostOffsetY: 0,
         };
         drawing.current = true;
       };
@@ -693,30 +688,21 @@ export function PageSurface({
           );
           if (travelled < DRAG_ACTIVATION_DISTANCE) continue;
 
-          const ghost = createMoveGhost(
-            objects,
-            session.ids,
-            session.startClientX,
-            session.startClientY,
-            liveRef.current,
-            loadedImagesRef.current,
-            zoom,
-            sizeCanvases(),
-          );
           session.active = true;
-          session.ghostEl = ghost?.element;
-          session.ghostOffsetX = ghost?.offsetX ?? 0;
-          session.ghostOffsetY = ghost?.offsetY ?? 0;
-
-          const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-          scheduleLocalObjects(current.filter((object) => !session.ids.includes(object.id)));
         }
 
-        if (session.ghostEl) {
-          const x = e.clientX - session.ghostOffsetX;
-          const y = e.clientY - session.ghostOffsetY;
-          session.ghostEl.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-        }
+        // Render the selected objects in place with their temporary position.
+        // Keeping the real image in the canvas avoids the flash/disappearance
+        // that occurred when swapping it for a separate drag ghost.
+        const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+        const draggingIds = new Set(session.ids);
+        scheduleLocalObjects(
+          current.map((object) =>
+            draggingIds.has(object.id)
+              ? translateObject(object, session.totalDx, session.totalDy)
+              : object,
+          ),
+        );
         continue;
       }
       if (drag.current?.kind === "lasso" || isPen(tool.name) || isShape(tool.name)) {
@@ -756,7 +742,6 @@ export function PageSurface({
       const totalDx = session.totalDx;
       const totalDy = session.totalDy;
 
-      session.ghostEl?.remove();
       drag.current = null;
       updateLocalObjects(null);
 
@@ -875,7 +860,6 @@ export function PageSurface({
     }
 
     drawing.current = false;
-    drag.current.ghostEl?.remove();
     drag.current = null;
     strokeBeforeState.current = null;
     updateLocalObjects(null);
@@ -1005,7 +989,6 @@ export function PageSurface({
       if (localFrameRef.current !== null) window.cancelAnimationFrame(localFrameRef.current);
       if (resizeFrameRef.current !== null) window.cancelAnimationFrame(resizeFrameRef.current);
       if (textSaveTimer.current !== null) clearTimeout(textSaveTimer.current);
-      if (drag.current?.kind === "move") drag.current.ghostEl?.remove();
     },
     [],
   );
@@ -1518,78 +1501,6 @@ export function PageSurface({
 
 const EMPTY: CanvasObject[] = [];
 const DRAG_ACTIVATION_DISTANCE = 4;
-
-function createMoveGhost(
-  objects: CanvasObject[],
-  ids: string[],
-  startClientX: number,
-  startClientY: number,
-  sourceCanvas: HTMLCanvasElement | null,
-  loadedImages: Map<string, HTMLImageElement>,
-  zoom: number,
-  dpr: number,
-) {
-  if (!sourceCanvas) return null;
-
-  const selectedObjects = objects.filter((object) => ids.includes(object.id));
-  const box = unionBBox(selectedObjects);
-  if (!box) return null;
-
-  const padding = 20;
-  const cssWidth = (box.w + padding * 2) * zoom;
-  const cssHeight = (box.h + padding * 2) * zoom;
-  const element = document.createElement("canvas");
-  element.id = "vanilla-drag-ghost";
-  element.width = Math.max(1, Math.round(cssWidth * dpr));
-  element.height = Math.max(1, Math.round(cssHeight * dpr));
-  element.style.position = "fixed";
-  element.style.top = "0";
-  element.style.left = "0";
-  element.style.width = `${cssWidth}px`;
-  element.style.height = `${cssHeight}px`;
-  element.style.pointerEvents = "none";
-  element.style.zIndex = "99999";
-  element.style.opacity = "0";
-  element.style.transformOrigin = "top left";
-  element.style.transition = "opacity 120ms cubic-bezier(0.2, 0, 0, 1)";
-  element.style.willChange = "transform, opacity";
-
-  const context = element.getContext("2d");
-  if (context) {
-    context.scale(zoom * dpr, zoom * dpr);
-    context.translate(-box.x + padding, -box.y + padding);
-
-    for (const object of selectedObjects) {
-      if (object.type === "stroke") drawStroke(context, object);
-      else if (object.type === "shape") drawShape(context, object);
-      else if (object.type === "text") drawText(context, object);
-      else if (object.type === "image") {
-        const image = loadedImages.get(object.id);
-        if (!image) continue;
-        context.save();
-        context.translate(object.x + object.w / 2, object.y + object.h / 2);
-        context.rotate((object.rotation * Math.PI) / 180);
-        context.drawImage(image, -object.w / 2, -object.h / 2, object.w, object.h);
-        context.restore();
-      }
-    }
-  }
-
-  const canvasRect = sourceCanvas.getBoundingClientRect();
-  const ghostScreenX = canvasRect.left + (box.x - padding) * zoom;
-  const ghostScreenY = canvasRect.top + (box.y - padding) * zoom;
-  element.style.transform = `translate3d(${ghostScreenX}px, ${ghostScreenY}px, 0)`;
-  document.body.appendChild(element);
-  window.requestAnimationFrame(() => {
-    if (element.isConnected) element.style.opacity = "0.98";
-  });
-
-  return {
-    element,
-    offsetX: startClientX - ghostScreenX,
-    offsetY: startClientY - ghostScreenY,
-  };
-}
 
 function isPen(t: ToolName) {
   return t === "ballpoint" || t === "fountain" || t === "pencil" || t === "highlighter";
