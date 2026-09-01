@@ -20,6 +20,8 @@ import type {
 import { COVER_COLORS, DEFAULT_PAPER, DEFAULT_SETTINGS, pageDimensions } from "./types";
 import type { BackupPreview } from "./io";
 import * as db from "./db";
+import type { BootStageId } from "./startup";
+import { partitionFolders, partitionNotebooks } from "./validation";
 
 export type SaveStatus = "saved" | "saving" | "error";
 
@@ -56,6 +58,7 @@ interface NotesState {
   pomodoroSession: import("./types").PomodoroSession | null;
   pomodoroHistory: import("./types").PomodoroRecord[];
   pomodoroTick: number;
+  isNavigating: boolean;
   ready: boolean;
   bootError: string | null;
   folders: Folder[];
@@ -89,7 +92,7 @@ interface NotesState {
   toc: TocItem[];
   pdfSearchHits: { pageIndex: number; text: string }[];
 
-  hydrate: () => Promise<void>;
+  hydrate: (options?: HydrateOptions) => Promise<void>;
   persistSettings: (patch: Partial<AppSettings>) => void;
   refreshStorage: () => Promise<void>;
 
@@ -128,7 +131,8 @@ interface NotesState {
   setCover: (id: string, color: string) => Promise<void>;
 
   openNotebook: (id: string) => Promise<void>;
-  closeTab: (id: string) => void;
+  closeTab: (id: string) => Promise<void>;
+  flushPendingWrites: () => Promise<void>;
   setPageIndex: (index: number) => void;
   setZoom: (z: number) => void;
   rememberView: () => void;
@@ -152,7 +156,7 @@ interface NotesState {
   removeBookmark: (id: string) => Promise<void>;
 
   exportPdf: (notebookId: string) => Promise<void>;
-  exportBackup: (kind: "full" | "notebook" | "incremental", notebookId?: string) => Promise<void>;
+  exportBackup: (kind: "full" | "notebook", notebookId?: string) => Promise<void>;
   importBackupFile: (
     file: File,
     mode: "merge" | "replace",
@@ -164,7 +168,15 @@ interface NotesState {
   deleteStoredBackup: (id: string) => Promise<void>;
 }
 
+export interface HydrateOptions {
+  safeMode?: boolean;
+  skipLastSession?: boolean;
+  onStage?: (stage: BootStageId, detail?: string) => void;
+  onWarning?: (message: string) => void;
+}
+
 let writeChain: Promise<void> = Promise.resolve();
+let hydratePromise: Promise<void> | null = null;
 
 function enqueue(label: string, task: () => Promise<void>) {
   const run = async () => {
@@ -200,7 +212,40 @@ function patchNb(id: string, partial: Partial<Notebook>) {
 let objectsSaveTimeout: any = null;
 const pendingSaves = new Map<string, CanvasObject[]>();
 
+async function drainPendingObjectSaves(createMirror = false) {
+  if (objectsSaveTimeout) {
+    clearTimeout(objectsSaveTimeout);
+    objectsSaveTimeout = null;
+  }
+  const saves = Array.from(pendingSaves, ([pageId, objects]) => ({ pageId, objects }));
+  pendingSaves.clear();
+  if (saves.length > 0) {
+    await enqueue("objects-batch", () => db.putObjectsBatch(saves));
+  } else {
+    await writeChain;
+  }
+  if (createMirror) await db.flushStorage();
+}
+
+function queueObjectSave(pageId: string, objects: CanvasObject[]) {
+  pendingSaves.set(pageId, objects);
+  if (objectsSaveTimeout) clearTimeout(objectsSaveTimeout);
+  objectsSaveTimeout = setTimeout(() => {
+    objectsSaveTimeout = null;
+    const saves = Array.from(pendingSaves, ([pendingPageId, savedObjects]) => ({
+      pageId: pendingPageId,
+      objects: savedObjects,
+    }));
+    pendingSaves.clear();
+    void enqueue("objects-batch", () => db.putObjectsBatch(saves));
+  }, 500);
+}
+
 export const useNotesStore = create<NotesState>((set, get) => ({
+  pomodoroSession: null,
+  pomodoroHistory: [],
+  pomodoroTick: 0,
+  isNavigating: false,
   ready: false,
   bootError: null,
   folders: [],
@@ -234,50 +279,116 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   toc: [],
   pdfSearchHits: [],
 
-  hydrate: async () => {
-    try {
-      const lib = await db.loadLibrary();
-      const meta = lib.meta as { initialized?: boolean };
-      if (!meta.initialized) {
-        const { seedLibrary } = await import("./seed");
-        await seedLibrary();
-        await db.putMeta({ initialized: true, schemaVersion: 1 });
-        await db.putSettings(DEFAULT_SETTINGS);
-      }
-      const again = await db.loadLibrary();
-      const backups = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
-      const validTabs = Array.from(
-        new Set(
-          (again.settings.openTabIds || []).filter((t) => again.notebooks.some((n) => n.id === t)),
-        ),
-      );
-      again.settings.openTabIds = validTabs;
-        const pomSession = await db.getPomodoroSession();
-        const pomHistory = await db.getPomodoroHistory();
-        set({
-          pomodoroSession: pomSession,
-          pomodoroHistory: pomHistory,
-        ready: true,
-        folders: again.folders,
-        notebooks: again.notebooks,
-        settings: again.settings,
-        lastSaveAt: again.settings.lastSaveAt,
-        backups,
-      });
-      document.documentElement.classList.toggle("dark", again.settings.theme === "dark");
-      void get().refreshStorage();
-      void get().runAutoBackup();
+  hydrate: (options = {}) => {
+    if (hydratePromise) return hydratePromise;
+    hydratePromise = (async () => {
+      set({ ready: false, bootError: null });
       try {
-        await navigator.storage?.persist?.();
-      } catch {
-        /* ignore */
+        options.onStage?.("database-opened");
+        await db.initializeStorage();
+        options.onStage?.("migration-complete");
+
+        const startup = await db.loadStartupData({ safeMode: options.safeMode });
+        for (const warning of startup.warnings) options.onWarning?.(warning);
+        options.onStage?.(
+          "settings-loaded",
+          options.safeMode ? "Đang dùng cài đặt mặc định tạm thời" : undefined,
+        );
+
+        let library = { folders: startup.folders, notebooks: startup.notebooks };
+        let meta = startup.meta as { initialized?: boolean };
+        if (!meta.initialized && library.folders.length === 0 && library.notebooks.length === 0) {
+          const { seedLibrary } = await import("./seed");
+          await seedLibrary();
+          await db.putMeta({ initialized: true, schemaVersion: 1 });
+          await db.putSettings(DEFAULT_SETTINGS);
+          library = await db.loadLibraryRecords();
+          meta = { initialized: true };
+        }
+
+        const folderResult = partitionFolders(library.folders);
+        const notebookResult = partitionNotebooks(library.notebooks);
+        if (folderResult.quarantined > 0) {
+          options.onWarning?.(
+            `Đã cô lập ${folderResult.quarantined} thư mục có dữ liệu không hợp lệ.`,
+          );
+        }
+        if (notebookResult.quarantined > 0) {
+          options.onWarning?.(
+            `Đã cô lập ${notebookResult.quarantined} sổ tay có dữ liệu không hợp lệ.`,
+          );
+        }
+        options.onStage?.(
+          "library-loaded",
+          `${notebookResult.valid.length} sổ tay, ${folderResult.valid.length} thư mục`,
+        );
+
+        const settings = startup.settings;
+        settings.openTabIds =
+          options.safeMode || options.skipLastSession
+            ? []
+            : Array.from(
+                new Set(
+                  settings.openTabIds.filter((tabId) =>
+                    notebookResult.valid.some((notebook) => notebook.id === tabId),
+                  ),
+                ),
+              );
+
+        let backups: BackupMeta[] = [];
+        let pomodoroSession: import("./types").PomodoroSession | null = null;
+        let pomodoroHistory: import("./types").PomodoroRecord[] = [];
+        if (!options.safeMode) {
+          const [backupResult, sessionResult, historyResult] = await Promise.allSettled([
+            db.listBackups(),
+            options.skipLastSession ? Promise.resolve(null) : db.getPomodoroSession(),
+            db.getPomodoroHistory(),
+          ]);
+          if (backupResult.status === "fulfilled") {
+            backups = backupResult.value.map(({ blob: _blob, ...rest }) => rest);
+          } else options.onWarning?.("Không tải được danh sách sao lưu; thư viện vẫn được mở.");
+          if (sessionResult.status === "fulfilled") pomodoroSession = sessionResult.value;
+          else options.onWarning?.("Không khôi phục được Pomodoro; đã bỏ qua tính năng phụ này.");
+          if (historyResult.status === "fulfilled") pomodoroHistory = historyResult.value;
+          else options.onWarning?.("Không tải được lịch sử Pomodoro; đã bỏ qua tính năng phụ này.");
+        }
+        options.onStage?.(
+          "session-restored",
+          options.safeMode || options.skipLastSession ? "Đã bỏ qua phiên trước" : undefined,
+        );
+
+        set({
+          pomodoroSession,
+          pomodoroHistory,
+          ready: true,
+          bootError: null,
+          folders: folderResult.valid,
+          notebooks: notebookResult.valid,
+          settings,
+          lastSaveAt: settings.lastSaveAt,
+          backups,
+        });
+        document.documentElement.classList.toggle("dark", settings.theme === "dark");
+        if (!options.safeMode) {
+          void get().refreshStorage().catch(() => undefined);
+          void get().runAutoBackup().catch(() => undefined);
+        }
+        try {
+          await navigator.storage?.persist?.();
+        } catch {
+          /* Optional persistence must never block startup. */
+        }
+      } catch (err) {
+        set({
+          bootError: err instanceof Error ? err.message : "Không mở được kho dữ liệu.",
+          ready: true,
+        });
+        throw err;
       }
-    } catch (err) {
-      set({
-        bootError: err instanceof Error ? err.message : "Không mở được kho dữ liệu.",
-        ready: true,
-      });
-    }
+    })().finally(() => {
+      hydratePromise = null;
+    });
+    return hydratePromise;
   },
 
   persistSettings: (patch) => {
@@ -558,6 +669,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   openNotebook: async (id) => {
+    await drainPendingObjectSaves();
     const payload = await db.loadNotebookPayload(id);
     const nb = get().notebooks.find((n) => n.id === id);
     const tabs = get().settings.openTabIds.includes(id)
@@ -577,26 +689,26 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     patchNb(id, { lastOpenedAt: Date.now() });
     if (nb?.pdfAssetId) {
       try {
-        const asset = await db.getAsset(nb.pdfAssetId);
-        if (asset) {
-          const { loadPdfDocument, pdfOutline } = await import("./pdf");
-          const doc = await loadPdfDocument(nb.pdfAssetId, await asset.blob.arrayBuffer());
-          const toc = await pdfOutline(doc);
-          set({ toc });
-        }
+        const { loadStoredPdfDocument, pdfOutline } = await import("./pdf");
+        const doc = await loadStoredPdfDocument(nb.pdfAssetId);
+        const toc = await pdfOutline(doc);
+        set({ toc });
       } catch {
         /* outline optional */
       }
     }
   },
 
-  closeTab: (id) => {
+  closeTab: async (id) => {
+    await drainPendingObjectSaves();
     const tabs = get().settings.openTabIds.filter((t) => t !== id);
     get().persistSettings({ openTabIds: tabs });
     if (get().activeNotebookId === id) {
       set({ activeNotebookId: tabs[0] ?? null, pages: [], bookmarks: [] });
     }
   },
+
+  flushPendingWrites: () => drainPendingObjectSaves(true),
 
   setPageIndex: (index) => {
     set({ currentPageIndex: index });
@@ -643,9 +755,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     });
     patchNb(nbId, { pageCount: pages.length });
     await enqueue("add-page", async () => {
-      await db.putPage(page);
+      await db.putPagesBatch(pages);
       await db.putObjects(page.id, []);
-      for (const p of pages) await db.putPage(p);
     });
   },
 
@@ -662,14 +773,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const nbId = get().activeNotebookId;
     if (nbId) patchNb(nbId, { pageCount: pages.length });
     await enqueue("dup-page", async () => {
-      await db.putPage(copy);
+      await db.putPagesBatch(pages);
       await db.putObjects(copy.id, objs);
-      for (const p of pages) await db.putPage(p);
     });
   },
 
   deletePage: async (pageId) => {
     if (get().pages.length <= 1) return;
+    await drainPendingObjectSaves();
     const pages = get()
       .pages.filter((p) => p.id !== pageId)
       .map((p, i) => ({ ...p, index: i }));
@@ -684,7 +795,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (nbId) patchNb(nbId, { pageCount: pages.length });
     await enqueue("del-page", async () => {
       await db.delPage(pageId);
-      for (const p of pages) await db.putPage(p);
+      await db.putPagesBatch(pages);
     });
   },
 
@@ -720,7 +831,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const next = pages.map((p, i) => ({ ...p, index: i }));
     set({ pages: next });
     await enqueue("reorder", async () => {
-      for (const p of next) await db.putPage(p);
+      await db.putPagesBatch(next);
     });
   },
 
@@ -737,17 +848,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
     set({ objectsByPage: { ...get().objectsByPage, [pageId]: objects } });
     
-    pendingSaves.set(pageId, objects);
-    if (objectsSaveTimeout) clearTimeout(objectsSaveTimeout);
-    objectsSaveTimeout = setTimeout(() => {
-      const saves = Array.from(pendingSaves.entries());
-      pendingSaves.clear();
-      void enqueue("objects-batch", async () => {
-        for (const [pId, objs] of saves) {
-          await db.putObjects(pId, objs);
-        }
-      });
-    }, 500);
+    queueObjectSave(pageId, objects);
 
     const nbId = get().activeNotebookId;
     if (nbId) patchNb(nbId, {});
@@ -766,7 +867,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       history: { ...get().history, [nbId]: hist },
       objectsByPage: { ...get().objectsByPage, [snap.pageId]: snap.objects },
     });
-    void enqueue("undo", () => db.putObjects(snap.pageId, snap.objects));
+    queueObjectSave(snap.pageId, snap.objects);
   },
 
   redo: () => {
@@ -782,7 +883,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       history: { ...get().history, [nbId]: hist },
       objectsByPage: { ...get().objectsByPage, [snap.pageId]: snap.objects },
     });
-    void enqueue("redo", () => db.putObjects(snap.pageId, snap.objects));
+    queueObjectSave(snap.pageId, snap.objects);
   },
 
   addBookmark: async (pageId, title) => {
@@ -807,11 +908,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       pages: payload.pages,
       objects: payload.objects,
     });
-    if (bytes.length < 100) throw new Error("T?p PDF xu?t ra qu? nh?, c? th? b? l?i.");
+    if (bytes.length < 100) throw new Error("Tệp PDF xuất ra quá nhỏ, có thể bị lỗi.");
     const header = new TextDecoder().decode(bytes.slice(0, 5));
-    if (header !== "%PDF-") throw new Error("T?p xu?t ra kh?ng ??ng ??nh d?ng PDF (sai Header).");
+    if (header !== "%PDF-") throw new Error("Tệp xuất ra không đúng định dạng PDF (sai header).");
     const footerStr = new TextDecoder().decode(bytes.slice(-200));
-    if (!footerStr.includes("%%EOF")) throw new Error("T?p xu?t ra kh?ng ??ng ??nh d?ng PDF (thi?u EOF).");
+    if (!footerStr.includes("%%EOF")) throw new Error("Tệp xuất ra không đúng định dạng PDF (thiếu EOF).");
     
     const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
@@ -819,8 +920,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   exportBackup: async (kind, notebookId) => {
-    const { buildBackupZip } = await import("./io");
-    const { blob, manifest } = await buildBackupZip(kind, notebookId);
+    const { buildVerifiedBackupZip } = await import("./io");
+    const { blob, manifest } = await buildVerifiedBackupZip(kind, notebookId);
     const { downloadBlob } = await import("@/lib/utils");
     const stamp = new Date().toISOString().slice(0, 10);
     const name =
@@ -862,10 +963,10 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
   },
   importBackupFile: async (file, mode) => {
-    const { inspectBackup, remapBackupDump, buildBackupZip } = await import("./io");
+    const { inspectBackup, remapBackupDump, buildVerifiedBackupZip } = await import("./io");
     const preview = await inspectBackup(file);
     if (mode === "replace") {
-      const safety = await buildBackupZip("full");
+      const safety = await buildVerifiedBackupZip("full");
       await db.putBackup({
         id: nid(),
         createdAt: Date.now(),
@@ -891,8 +992,8 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const day = 24 * 3600 * 1000;
     if (s.lastBackupAt && Date.now() - s.lastBackupAt < day) return;
     try {
-      const { buildBackupZip } = await import("./io");
-      const { blob, manifest } = await buildBackupZip("full");
+      const { buildVerifiedBackupZip } = await import("./io");
+      const { blob, manifest } = await buildVerifiedBackupZip("full");
       const rec = {
         id: nid(),
         createdAt: Date.now(),
@@ -905,20 +1006,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       };
       await db.putBackup(rec);
       const all = await db.listBackups();
-      const autos = all.filter((b) => b.kind === "auto");
+      const autos = all
+        .filter((backup) => backup.kind === "auto")
+        .sort((left, right) => right.createdAt - left.createdAt);
       const keep = s.backupKeep || 7;
-      // Only delete old chains safely. For now, to prevent breaking chains, we only delete if it's safe.
-        // A simple safe way: keep the latest "keep" full backups and all incrementals after the oldest kept full backup.
-        const fulls = autos.filter(a => {
-            const m = manifests.find(man => man.backupId === a.id || man.backupId === (a as any).backupId);
-            return m && m.type === "full";
-        });
-        if (fulls.length > keep) {
-            // Find the cutoff timestamp
-            const cutoff = fulls[keep - 1].createdAt;
-            for (const old of autos) {
-                if (old.createdAt < cutoff) await db.delBackup(old.id);
-            }
+      for (const old of autos.slice(keep)) {
+        await db.delBackup(old.id);
         }
       const list = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
       set({ backups: list });

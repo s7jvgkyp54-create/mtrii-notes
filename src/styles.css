@@ -1,13 +1,9 @@
+@import "@fontsource/be-vietnam-pro/400.css";
+@import "@fontsource/be-vietnam-pro/500.css";
+@import "@fontsource/be-vietnam-pro/600.css";
+@import "@fontsource/be-vietnam-pro/700.css";
 @import "tailwindcss";
 @source "./**/*.{ts,tsx}";
-
-@font-face {
-  font-family: "Be Vietnam Pro";
-  src: url("/fonts/BeVietnamPro-Regular.ttf") format("truetype");
-  font-style: normal;
-  font-weight: 400 700;
-  font-display: swap;
-}
 
 :root {
   --bg: #efebe4;
@@ -36,7 +32,7 @@
   --radius-lg: 16px;
   --radius-xl: 24px;
   --motion-quick: 150ms;
-  --motion-fast: 250ms;
+  --motion-fast: 180ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -44,10 +40,10 @@
   --bg: #141618;
   --surface: #1c1f23;
   --surface-2: #24282e;
-  --desk: #0d0f11;
+  --desk: #292d33;
   --fg: #f4f1ec;
   --muted: #a8a29a;
-  --subtle: #7a746c;
+  --subtle: #948e86;
   --border: color-mix(in oklab, #f4f1ec 12%, transparent);
   --border-strong: color-mix(in oklab, #f4f1ec 22%, transparent);
   --accent: #2dd4bf;
@@ -119,6 +115,35 @@
   p {
     text-wrap: pretty;
   }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+.app-dialog-overlay {
+  animation: notes-fade-in var(--motion-fast) ease-out;
+}
+
+.app-dialog-content,
+.app-menu-content {
+  animation: notes-pop-in var(--motion-fast) var(--ease-out);
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin, center);
+}
+
+.library-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px;
+}
+
+@keyframes notes-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes notes-pop-in {
+  from { opacity: 0; scale: 0.98; }
+  to { opacity: 1; scale: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -127,6 +152,18 @@
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  button,
+  [role="button"],
+  [role="menuitem"],
+  input,
+  select,
+  textarea {
+    min-width: 40px;
+    min-height: 40px;
   }
 }
 

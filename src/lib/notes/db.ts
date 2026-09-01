@@ -9,8 +9,8 @@ import type {
   Notebook,
   PageRecord,
 } from "./types";
-import { DEFAULT_SETTINGS } from "./types";
 import * as desktop from "./desktop-db";
+import { normalizeSettings } from "./validation";
 
 interface NotesDB extends DBSchema {
   folders: { key: string; value: Folder };
@@ -59,20 +59,56 @@ export function getDb() {
   return dbPromise;
 }
 
-export async function loadLibrary() {
-  if (desktop.isDesktopRuntime()) return desktop.loadLibrary();
-  const db = await getDb();
-  const [folders, notebooks, settingsRaw, meta] = await Promise.all([
-    db.getAll("folders"),
-    db.getAll("notebooks"),
-    db.get("kv", "settings"),
-    db.get("kv", "meta"),
+export async function initializeStorage() {
+  if (desktop.isDesktopRuntime()) return desktop.initializeStorage();
+  await getDb();
+}
+
+export async function loadSettingsAndMeta(options?: { safeMode?: boolean }) {
+  if (desktop.isDesktopRuntime()) return desktop.loadSettingsAndMeta(options);
+  const database = await getDb();
+  const [settingsResult, metaResult] = await Promise.allSettled([
+    database.get("kv", "settings"),
+    database.get("kv", "meta"),
   ]);
-  const settings: AppSettings = {
-    ...DEFAULT_SETTINGS,
-    ...((settingsRaw as AppSettings | undefined) ?? {}),
+  const warnings: string[] = [];
+  if (settingsResult.status === "rejected") warnings.push("Không đọc được cài đặt; đã dùng mặc định.");
+  if (metaResult.status === "rejected") warnings.push("Không đọc được metadata khởi động.");
+  return {
+    settings: normalizeSettings(
+      settingsResult.status === "fulfilled" ? settingsResult.value : undefined,
+      options?.safeMode,
+    ),
+    meta:
+      metaResult.status === "fulfilled" && metaResult.value && typeof metaResult.value === "object"
+        ? (metaResult.value as Record<string, unknown>)
+        : {},
+    warnings,
   };
-  return { folders, notebooks, settings, meta: (meta as Record<string, unknown> | undefined) ?? {} };
+}
+
+export async function loadLibraryRecords() {
+  if (desktop.isDesktopRuntime()) return desktop.loadLibraryRecords();
+  const database = await getDb();
+  const [folders, notebooks] = await Promise.all([
+    database.getAll("folders"),
+    database.getAll("notebooks"),
+  ]);
+  return { folders, notebooks };
+}
+
+export async function loadLibrary() {
+  const [library, startup] = await Promise.all([loadLibraryRecords(), loadSettingsAndMeta()]);
+  return { ...library, settings: startup.settings, meta: startup.meta };
+}
+
+export async function loadStartupData(options?: { safeMode?: boolean }) {
+  if (desktop.isDesktopRuntime()) return desktop.loadStartupData(options);
+  const [library, startup] = await Promise.all([
+    loadLibraryRecords(),
+    loadSettingsAndMeta(options),
+  ]);
+  return { ...library, ...startup };
 }
 
 export async function putFolder(folder: Folder) {
@@ -95,6 +131,14 @@ export async function putPage(page: PageRecord) {
   if (desktop.isDesktopRuntime()) return desktop.putPage(page);
   await (await getDb()).put("pages", page);
 }
+export async function putPagesBatch(pages: PageRecord[]) {
+  if (pages.length === 0) return;
+  if (desktop.isDesktopRuntime()) return desktop.putPagesBatch(pages);
+  const database = await getDb();
+  const tx = database.transaction("pages", "readwrite");
+  await Promise.all(pages.map((page) => tx.store.put(page)));
+  await tx.done;
+}
 export async function delPage(id: string) {
   if (desktop.isDesktopRuntime()) return desktop.delPage(id);
   const db = await getDb();
@@ -104,6 +148,16 @@ export async function delPage(id: string) {
 export async function putObjects(pageId: string, objects: CanvasObject[]) {
   if (desktop.isDesktopRuntime()) return desktop.putObjects(pageId, objects);
   await (await getDb()).put("pageObjects", { pageId, objects });
+}
+export async function putObjectsBatch(entries: { pageId: string; objects: CanvasObject[] }[]) {
+  if (entries.length === 0) return;
+  if (desktop.isDesktopRuntime()) return desktop.putObjectsBatch(entries);
+  const database = await getDb();
+  const tx = database.transaction("pageObjects", "readwrite");
+  await Promise.all(
+    entries.map(({ pageId, objects }) => tx.store.put({ pageId, objects })),
+  );
+  await tx.done;
 }
 export async function putAsset(asset: AssetRecord) {
   if (desktop.isDesktopRuntime()) return desktop.putAsset(asset);
@@ -252,13 +306,29 @@ export async function openDataFolder() {
   await desktop.openDataFolder();
 }
 
+export async function flushStorage() {
+  if (desktop.isDesktopRuntime()) {
+    await desktop.flushStorage();
+  }
+}
+
 const urlCache = new Map<string, string>();
+const MAX_OBJECT_URLS = 48;
 
 export function objectUrlFor(id: string, blob: Blob) {
   const existing = urlCache.get(id);
-  if (existing) return existing;
+  if (existing) {
+    urlCache.delete(id);
+    urlCache.set(id, existing);
+    return existing;
+  }
   const url = URL.createObjectURL(blob);
   urlCache.set(id, url);
+  while (urlCache.size > MAX_OBJECT_URLS) {
+    const oldest = urlCache.keys().next().value as string | undefined;
+    if (!oldest || oldest === id) break;
+    revokeObjectUrl(oldest);
+  }
   return url;
 }
 

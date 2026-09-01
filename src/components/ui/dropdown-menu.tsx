@@ -15,7 +15,7 @@ export function DropdownMenu({
       <Dropdown.Portal>
         <Dropdown.Content
           sideOffset={6}
-          className="z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-surface-2 p-1 text-sm text-fg shadow-md"
+          className="app-menu-content z-50 min-w-44 overflow-hidden rounded-lg border border-border bg-surface-2 p-1 text-sm text-fg shadow-[var(--shadow-soft)]"
         >
           {children}
         </Dropdown.Content>
@@ -40,7 +40,7 @@ export function MenuItem({
       disabled={disabled}
       onSelect={onSelect}
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 outline-none data-[highlighted]:bg-overlay",
+        "flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 outline-none data-[highlighted]:bg-overlay data-[disabled]:pointer-events-none",
         danger && "text-danger",
         disabled && "opacity-40",
       )}

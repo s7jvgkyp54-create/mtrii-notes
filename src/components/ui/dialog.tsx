@@ -21,10 +21,10 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-fg/40" />
+        <DialogPrimitive.Overlay className="app-dialog-overlay fixed inset-0 z-50 bg-fg/40 backdrop-blur-[2px]" />
         <DialogPrimitive.Content
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 w-[min(92vw,440px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface-2 p-5 text-fg shadow-lg outline-none",
+            "app-dialog-content fixed top-1/2 left-1/2 z-50 w-[min(92vw,440px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface-2 p-5 text-fg shadow-[var(--shadow-soft)] outline-none",
             className,
           )}
         >
@@ -39,7 +39,7 @@ export function Dialog({
                 <DialogPrimitive.Description className="sr-only">{title}</DialogPrimitive.Description>
               )}
             </div>
-            <DialogPrimitive.Close className="grid size-8 place-items-center rounded-full hover:bg-overlay">
+            <DialogPrimitive.Close className="grid size-10 place-items-center rounded-full hover:bg-overlay" aria-label="Đóng hộp thoại">
               <X className="size-4" />
             </DialogPrimitive.Close>
           </div>

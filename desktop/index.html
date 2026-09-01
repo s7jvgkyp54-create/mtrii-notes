@@ -5,8 +5,225 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f766e" />
     <title>Notes</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: #efebe4;
+        color: #1c1917;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #boot-fallback {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #efebe4;
+      }
+      .boot-card {
+        width: min(100%, 480px);
+        padding: 28px;
+        border: 1px solid rgba(28, 25, 23, 0.12);
+        border-radius: 16px;
+        background: #fbf8f3;
+        box-shadow: 0 12px 34px rgba(28, 25, 23, 0.1);
+      }
+      .boot-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .boot-mark {
+        display: grid;
+        width: 48px;
+        height: 48px;
+        place-items: center;
+        border-radius: 12px;
+        background: rgba(15, 118, 110, 0.12);
+      }
+      .boot-title {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 650;
+      }
+      .boot-subtitle,
+      .boot-detail {
+        margin: 3px 0 0;
+        color: #6b645c;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .boot-status {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 28px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .boot-spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid rgba(15, 118, 110, 0.2);
+        border-top-color: #0f766e;
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+      .boot-track {
+        height: 6px;
+        margin-top: 18px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(28, 25, 23, 0.08);
+      }
+      .boot-progress {
+        width: 24%;
+        height: 100%;
+        border-radius: inherit;
+        background: #0f766e;
+        animation: boot-progress 2.2s ease-in-out infinite alternate;
+      }
+      .boot-recovery {
+        display: none;
+        margin-top: 22px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(28, 25, 23, 0.12);
+      }
+      .boot-recovery[data-visible="true"] {
+        display: block;
+      }
+      .boot-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .boot-button {
+        min-height: 42px;
+        padding: 0 15px;
+        border: 1px solid rgba(28, 25, 23, 0.18);
+        border-radius: 9px;
+        background: #fff;
+        color: #1c1917;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .boot-button.primary {
+        border-color: #0f766e;
+        background: #0f766e;
+        color: #f7fffe;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes boot-progress {
+        to {
+          width: 72%;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-spinner,
+        .boot-progress {
+          animation: none;
+        }
+      }
+    </style>
+    <script>
+      (() => {
+        const startedAt = Date.now();
+        window.__NOTES_EARLY_BOOT__ = {
+          startedAt,
+          events: [
+            { stage: "window-created", at: startedAt },
+            { stage: "html-loaded", at: Date.now() },
+          ],
+        };
+        const showRecovery = (message) => {
+          const recovery = document.getElementById("boot-recovery");
+          const detail = document.getElementById("boot-detail");
+          if (detail) detail.textContent = message;
+          recovery?.setAttribute("data-visible", "true");
+        };
+        window.addEventListener(
+          "error",
+          (event) => {
+            const message = event.message || "Không tải được thành phần giao diện chính.";
+            window.__NOTES_EARLY_BOOT__.failure = { message };
+            showRecovery(message);
+          },
+          true,
+        );
+        window.addEventListener("unhandledrejection", (event) => {
+          const message = event.reason?.message || "JavaScript chính không thể hoàn tất khởi động.";
+          window.__NOTES_EARLY_BOOT__.failure = { message };
+          showRecovery(message);
+        });
+        window.setTimeout(() => {
+          if (!document.getElementById("boot-fallback")?.hidden) {
+            showRecovery("JavaScript chính chưa sẵn sàng sau 9 giây. Bạn có thể thử lại an toàn.");
+          }
+        }, 9000);
+        window.addEventListener("DOMContentLoaded", () => {
+          document.getElementById("boot-retry")?.addEventListener("click", () => location.reload());
+          document.getElementById("boot-safe")?.addEventListener("click", () => {
+            try {
+              localStorage.setItem("notes.startup.safe-mode-once", "1");
+            } catch {}
+            location.reload();
+          });
+        });
+      })();
+    </script>
   </head>
   <body>
+    <div id="boot-fallback" role="status" aria-live="polite">
+      <section class="boot-card">
+        <div class="boot-brand">
+          <span class="boot-mark" aria-hidden="true">
+            <svg width="34" height="34" viewBox="0 0 32 32">
+              <rect x="7" y="4" width="20" height="23" rx="3" fill="#0f766e" />
+              <rect x="7" y="4" width="3.5" height="23" rx="1" fill="#000" opacity=".2" />
+              <path d="M14 11h8M14 15h8M14 19h5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" />
+            </svg>
+          </span>
+          <div>
+            <p class="boot-title">Notes</p>
+            <p class="boot-subtitle">Đang khởi động…</p>
+          </div>
+        </div>
+        <div class="boot-status">
+          <span class="boot-spinner" aria-hidden="true"></span>
+          <span>HTML gốc đã tải</span>
+        </div>
+        <div class="boot-track" aria-hidden="true"><div class="boot-progress"></div></div>
+        <div class="boot-recovery" id="boot-recovery">
+          <p class="boot-title">Notes cần trợ giúp để mở</p>
+          <p class="boot-detail" id="boot-detail">
+            Giao diện chính chưa phản hồi. Dữ liệu của bạn chưa bị thay đổi.
+          </p>
+          <div class="boot-actions">
+            <button class="boot-button" id="boot-retry" type="button">Khởi động lại</button>
+            <button class="boot-button primary" id="boot-safe" type="button">Mở chế độ an toàn</button>
+          </div>
+        </div>
+      </section>
+    </div>
     <div id="root"></div>
     <script type="module" src="../src/desktop.tsx"></script>
   </body>

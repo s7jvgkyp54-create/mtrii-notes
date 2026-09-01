@@ -43,8 +43,7 @@ import {
 } from "@/lib/notes/types";
 import { useNotesStore } from "@/lib/notes/store";
 import { displaySize } from "@/lib/notes/geometry";
-import { searchPdfText, loadPdfDocument } from "@/lib/notes/pdf";
-import { getAsset } from "@/lib/notes/db";
+import { loadStoredPdfDocument, searchPdfText } from "@/lib/notes/pdf";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import { OPEN_IMAGE_PICKER_EVENT, PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
@@ -132,10 +131,28 @@ export function EditorView({ notebookId }: { notebookId: string }) {
     return () => window.cancelAnimationFrame(frame);
   }, [notebookId, ready]);
 
-  const handleCloseTab = (id: string, e?: React.MouseEvent) => {
+  useEffect(() => {
+    if (!ready) return;
+    void import("@/lib/notes/performance").then((monitor) =>
+      monitor.sampleFrameRate("editor-open"),
+    );
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const startedAt = performance.now();
+    const frame = requestAnimationFrame(() => {
+      void import("@/lib/notes/performance").then((monitor) =>
+        monitor.recordDuration("page-switch-to-frame", performance.now() - startedAt),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [pageIndex, ready]);
+
+  const handleCloseTab = async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const remaining = tabs.filter((t) => t !== id);
-    useNotesStore.getState().closeTab(id);
+    await useNotesStore.getState().closeTab(id);
     if (id === notebookId) {
       if (remaining.length > 0) {
         const nextId = remaining[remaining.length - 1];
@@ -167,8 +184,9 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             variant="ghost"
             size="sm"
             onClick={() => {
-              useNotesStore.getState().rememberView();
-              void navigate({ to: "/" });
+              const store = useNotesStore.getState();
+              store.rememberView();
+              void store.flushPendingWrites().then(() => navigate({ to: "/" }));
             }}
           >
             <ArrowLeft /> Thư viện
@@ -440,7 +458,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
           >
             <Search className="size-3.5 text-subtle" />
             <Input
-              className="h-8 w-40"
+              className="h-10 w-40"
               placeholder="Tìm trong PDF…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -893,9 +911,7 @@ async function runSearch(notebookId: string, q: string) {
     return;
   }
   try {
-    const asset = await getAsset(nb.pdfAssetId);
-    if (!asset) return;
-    const doc = await loadPdfDocument(nb.pdfAssetId, await asset.blob.arrayBuffer());
+    const doc = await loadStoredPdfDocument(nb.pdfAssetId);
     const hits = await searchPdfText(doc, q);
     useNotesStore.setState({ pdfSearchHits: hits });
     if (!hits.length) toast.message("Không thấy kết quả.");

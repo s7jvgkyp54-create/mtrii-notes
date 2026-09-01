@@ -20,8 +20,7 @@ export function PomodoroMini({ onOpenFull }: { onOpenFull: () => void }) {
   const minutes = Math.floor(remaining / 60000);
   const seconds = Math.floor((remaining % 60000) / 1000);
   const isPaused = session.lastPausedAt !== null;
-  const progress = remaining / session.durationMs;
-  
+
   const colors = {
      focus: "bg-red-500/20 text-red-500 border-red-500/30",
      shortBreak: "bg-green-500/20 text-green-500 border-green-500/30",

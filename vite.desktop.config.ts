@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   root: "desktop",
+  base: "./",
   publicDir: "../public",
   resolve: {
     alias: {

@@ -113,7 +113,10 @@ test("a signal-killed command is never reported as success", async () => {
   );
 });
 
-test("the CLI still runs when invoked through a symlinked path", async () => {
+test(
+  "the CLI still runs when invoked through a symlinked path",
+  { skip: process.platform === "win32" ? "Windows symlinks require Developer Mode" : false },
+  async () => {
   // node realpaths import.meta.url but not process.argv[1], so a raw comparison
   // turns the wrapper into a no-op that exits 0 without starting anything.
   const link = join(mkdtempSync(join(tmpdir(), "app-env-link-")), "scripts");
@@ -125,4 +128,5 @@ test("the CLI still runs when invoked through a symlinked path", async () => {
     PRINT_FLAG,
   ]);
   assert.equal(stdout, "false");
-});
+  },
+);

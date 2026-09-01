@@ -27,10 +27,11 @@ if (args.error) {
 }
 
 const url = checkedUrl(args.url);
-const outPng = checkedOutputPath(args.outPng, ["/workspace"]);
+const allowedOutputDirs = ["/workspace", realpathSync(process.cwd())];
+const outPng = checkedOutputPath(args.outPng, allowedOutputDirs);
 const derived = derivedPaths(outPng);
-const mobilePng = checkedOutputPath(derived.mobilePng, ["/workspace"]);
-const outJson = checkedOutputPath(derived.verdictJson, ["/workspace"], "verdict JSON");
+const mobilePng = checkedOutputPath(derived.mobilePng, allowedOutputDirs);
+const outJson = checkedOutputPath(derived.verdictJson, allowedOutputDirs, "verdict JSON");
 
 const MAX_BASELINE_BYTES = 1024 * 1024;
 const baselineRequested = Boolean(args.baseline);
@@ -38,7 +39,7 @@ let baselinePath = null;
 let baselineResolveError = null;
 if (baselineRequested) {
   try {
-    baselinePath = checkedOutputPath(realpathSync(args.baseline), ["/workspace"], "baseline");
+    baselinePath = checkedOutputPath(realpathSync(args.baseline), allowedOutputDirs, "baseline");
   } catch (err) {
     baselineResolveError = err?.code ?? "unresolvable path";
   }
@@ -92,6 +93,9 @@ let browser = null;
 try {
   browser = await chromium.launch({
     headless: true,
+    ...(process.env.BROWSER_CHROMIUM_EXECUTABLE
+      ? { executablePath: process.env.BROWSER_CHROMIUM_EXECUTABLE }
+      : {}),
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
   });
 
@@ -102,7 +106,12 @@ try {
       viewport: { width: vp.width, height: vp.height },
     });
     page.on("console", (msg) => {
-      if (msg.type() === "error") errors.consoleErrors.push(msg.text());
+      if (msg.type() !== "error") return;
+      const location = msg.location();
+      const isLocalBrandingFetchBlocked =
+        location.url === "https://grok.com/grok-app-builder/extensions.js" &&
+        msg.text().includes("ERR_BLOCKED_BY_RESPONSE.NotSameOrigin");
+      if (!isLocalBrandingFetchBlocked) errors.consoleErrors.push(msg.text());
     });
     page.on("pageerror", (err) => errors.pageErrors.push(String(err?.message || err)));
     // `domcontentloaded`, not `networkidle`: Vite keeps an HMR websocket open, so

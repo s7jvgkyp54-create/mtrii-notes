@@ -6,10 +6,9 @@ import type {
   CanvasObject,
   Folder,
   Notebook,
-  PageRecord,
-  Tombstone
+  PageRecord
 } from "./types";
-import { DEFAULT_SETTINGS } from "./types";
+import { normalizeSettings } from "./validation";
 
 type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups" | "pomodoroHistory";
 
@@ -34,6 +33,13 @@ export type DesktopDump = {
   meta: Record<string, unknown> | undefined;
 };
 
+type DesktopStartupData = {
+  folders: Folder[];
+  notebooks: Notebook[];
+  settings: AppSettings | null;
+  meta: Record<string, unknown> | null;
+};
+
 let initPromise: Promise<void> | null = null;
 
 export function isDesktopRuntime() {
@@ -46,8 +52,17 @@ async function call<T>(command: string, args: Record<string, unknown> = {}) {
 }
 
 async function ready() {
-  if (!initPromise) initPromise = call<void>("native_initialize");
+  if (!initPromise) {
+    initPromise = call<void>("native_initialize").catch((error) => {
+      initPromise = null;
+      throw error;
+    });
+  }
   return initPromise;
+}
+
+export async function initializeStorage() {
+  await ready();
 }
 
 async function all<T>(entity: Entity) {
@@ -63,6 +78,12 @@ async function byNotebook<T>(entity: Entity, notebookId: string) {
 async function put(entity: Entity, id: string, value: unknown) {
   await ready();
   await call("native_put_json", { entity, id, value });
+}
+
+async function putMany(writes: { entity: Entity; id: string; value: unknown }[]) {
+  if (writes.length === 0) return;
+  await ready();
+  await call("native_put_json_batch", { writes });
 }
 
 async function remove(entity: Entity, id: string) {
@@ -81,18 +102,49 @@ async function kvPut(key: string, value: unknown) {
 }
 
 export async function loadLibrary() {
-  const [folders, notebooks, settingsRaw, meta] = await Promise.all([
-    all<Folder>("folders"),
-    all<Notebook>("notebooks"),
+  const [library, startup] = await Promise.all([loadLibraryRecords(), loadSettingsAndMeta()]);
+  return { ...library, settings: startup.settings, meta: startup.meta };
+}
+
+export async function loadSettingsAndMeta(options?: { safeMode?: boolean }) {
+  const [settingsResult, metaResult] = await Promise.allSettled([
     kvGet<AppSettings>("settings"),
     kvGet<Record<string, unknown>>("meta"),
   ]);
+  const warnings: string[] = [];
+  if (settingsResult.status === "rejected") warnings.push("Không đọc được cài đặt; đã dùng mặc định.");
+  if (metaResult.status === "rejected") warnings.push("Không đọc được metadata khởi động.");
   return {
-    folders,
-    notebooks,
-    settings: { ...DEFAULT_SETTINGS, ...(settingsRaw ?? {}) },
-    meta: meta ?? {},
+    settings: normalizeSettings(
+      settingsResult.status === "fulfilled" ? settingsResult.value : undefined,
+      options?.safeMode,
+    ),
+    meta:
+      metaResult.status === "fulfilled" && metaResult.value && typeof metaResult.value === "object"
+        ? metaResult.value
+        : {},
+    warnings,
   };
+}
+
+export async function loadStartupData(options?: { safeMode?: boolean }) {
+  await ready();
+  const data = await call<DesktopStartupData>("native_load_startup_data");
+  return {
+    folders: data.folders,
+    notebooks: data.notebooks,
+    settings: normalizeSettings(data.settings ?? undefined, options?.safeMode),
+    meta: data.meta ?? {},
+    warnings: [] as string[],
+  };
+}
+
+export async function loadLibraryRecords() {
+  const [folders, notebooks] = await Promise.all([
+    all<Folder>("folders"),
+    all<Notebook>("notebooks"),
+  ]);
+  return { folders, notebooks };
 }
 
 export const putFolder = (folder: Folder) => put("folders", folder.id, folder);
@@ -100,9 +152,21 @@ export const delFolder = async (id: string) => { await remove("folders", id); aw
 export const putNotebook = (notebook: Notebook) => put("notebooks", notebook.id, notebook);
 export const delNotebook = async (id: string) => { await remove("notebooks", id); await put("tombstones", id, { id, type: "notebook", deletedAt: Date.now() }); };
 export const putPage = (page: PageRecord) => put("pages", page.id, page);
+export const putPagesBatch = (pages: PageRecord[]) =>
+  putMany(pages.map((page) => ({ entity: "pages" as const, id: page.id, value: page })));
 export const delPage = async (id: string) => { await remove("pages", id); await put("tombstones", id, { id, type: "page", deletedAt: Date.now() }); };
 export const putObjects = (pageId: string, objects: CanvasObject[]) =>
   put("pageObjects", pageId, { pageId, objects, updatedAt: Date.now() });
+export const putObjectsBatch = (entries: { pageId: string; objects: CanvasObject[] }[]) => {
+  const updatedAt = Date.now();
+  return putMany(
+    entries.map(({ pageId, objects }) => ({
+      entity: "pageObjects" as const,
+      id: pageId,
+      value: { pageId, objects, updatedAt },
+    })),
+  );
+};
 export const putBookmark = (bookmark: Bookmark) => put("bookmarks", bookmark.id, bookmark);
 export const delBookmark = async (id: string) => { await remove("bookmarks", id); await put("tombstones", id, { id, type: "bookmark", deletedAt: Date.now() }); };
 export const putSettings = (settings: AppSettings) => kvPut("settings", settings);
@@ -227,6 +291,11 @@ export async function openDataFolder() {
   await call("native_open_data_folder");
 }
 
+export async function flushStorage() {
+  await ready();
+  await call("native_flush_storage");
+}
+
 export const putBackupManifest = (manifest: import("./types").BackupManifest) => put("backups", manifest.backupId, manifest);
 export const getBackupManifests = () => all<import("./types").BackupManifest>("backups");
 export const getTombstones = () => all<import("./types").Tombstone>("tombstones");
@@ -248,40 +317,11 @@ export async function dumpIncremental(lastBackupTime: number): Promise<DesktopDu
 }
 
 export async function restoreBackupChain(targetBackupId: string) {
-    const all = await all<import("./types").BackupRecord>("backups");
-    const manifests = all.map(a => a as unknown as import("./types").BackupManifest);
-    
-    // Find target
-    const target = manifests.find(m => m.backupId === targetBackupId);
-    if (!target) throw new Error("Kh?ng t?m th?y b?n sao l?u " + targetBackupId);
-
-    // Build chain from target up to full
-    const chain: import("./types").BackupManifest[] = [];
-    let curr = target;
-    while (curr) {
-       chain.unshift(curr); // prepend so full is first
-       if (curr.type === "full") break;
-       if (!curr.parentBackupId) throw new Error("B?n t?ng d?n " + curr.backupId + " b? thi?u parentBackupId!");
-       const parent = manifests.find(m => m.backupId === curr.parentBackupId);
-       if (!parent) throw new Error("Chu?i sao l?u b? ??t ?o?n: thi?u " + curr.parentBackupId);
-       curr = parent;
-    }
-
-    if (chain[0].type !== "full") throw new Error("Chu?i sao l?u kh?ng b?t ??u b?ng b?n Full!");
-
-    const { inspectBackup } = await import("./io");
-    
-    for (let i = 0; i < chain.length; i++) {
-        const item = chain[i];
-        const record = all.find(a => a.id === item.backupId || (a as any).backupId === item.backupId);
-        if (!record || !record.blob) throw new Error("Thi?u d? li?u (blob) cho b?n sao l?u " + item.backupId);
-        
-        const preview = await inspectBackup(record.blob);
-        
-        // Full backup replaces everything. Incrementals merge.
-        const isFull = i === 0;
-        await importDump(preview.dump, isFull);
-    }
+  const record = await getBackup(targetBackupId);
+  if (!record) throw new Error(`Không tìm thấy bản sao lưu ${targetBackupId}`);
+  const { inspectBackup } = await import("./io");
+  const preview = await inspectBackup(record.blob);
+  await importDump(preview.dump, true);
 }
 
 export const putPomodoroRecord = (record: import("./types").PomodoroRecord) => put("pomodoroHistory", record.id, record);

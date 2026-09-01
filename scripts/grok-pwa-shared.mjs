@@ -259,12 +259,6 @@ export function ogCardPublicPath(cwd = process.cwd()) {
   return "";
 }
 
-function detectCustomOgCard(cwd = process.cwd(), site = {}) {
-  if (ogCardPublicPath(cwd)) return true;
-  // Vercel runtime has no public/: trust a bake that already saw the file.
-  return siteHasCustomCard(site) || Boolean(String(site.image ?? "").trim());
-}
-
 /** Snapshot for Vite/Nitro to bake into the server bundle (Vercel has no workspace FS). */
 export function snapshotOgIdentity(cwd = process.cwd()) {
   const site = { ...readOgSite(cwd) };
@@ -323,7 +317,9 @@ export function siteHasCustomCard(site = {}) {
  * Otherwise empty — caller emits the og.grok.me placeholder.
  */
 export function resolveOgCardAsset(site = {}, cwd = process.cwd()) {
-  return ogCardPublicPath(cwd) || (detectCustomOgCard(cwd, site) ? String(site.image ?? "").trim() || "/og.jpg" : "");
+  const disk = cwd ? ogCardPublicPath(cwd) : "";
+  const custom = Boolean(disk) || siteHasCustomCard(site) || Boolean(String(site.image ?? "").trim());
+  return disk || (custom ? String(site.image ?? "").trim() || "/og.jpg" : "");
 }
 
 /** Stamp `card=custom` when public/og.jpg or public/og.png is on disk. */
@@ -406,10 +402,12 @@ export function normalizeHeadContext(ctx = {}) {
   // public/og.jpg generated after that snapshot (or missed by a wrong cwd)
   // wins over the og.grok.me placeholder. Vercel has no public/ to read, so
   // a correct bake is unchanged.
-  const site = applyCustomCardFromFs(
-    ctx.site !== undefined ? ctx.site : snapshotOgIdentity(cwd).site,
-    cwd,
-  );
+  // Direct helper calls are pure by default; only runtime callers that pass a
+  // workspace cwd inspect its branding files. This keeps tests and consumers
+  // from inheriting whichever app happens to be the current process cwd.
+  const baseSite =
+    ctx.site !== undefined ? ctx.site : ctx.cwd !== undefined ? snapshotOgIdentity(cwd).site : {};
+  const site = ctx.cwd !== undefined ? applyCustomCardFromFs(baseSite, cwd) : baseSite;
   const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, ctx.host ?? "");
   return {
     appName,
@@ -417,7 +415,7 @@ export function normalizeHeadContext(ctx = {}) {
     creator: ctx.creator ?? readXCreator(),
     creatorId: ctx.creatorId ?? readXCreatorId(),
     host: ctx.host ?? "",
-    cwd,
+    cwd: ctx.cwd !== undefined ? cwd : null,
     site,
   };
 }

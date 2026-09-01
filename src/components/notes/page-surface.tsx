@@ -18,8 +18,9 @@ import {
   type Pt,
 } from "@/lib/notes/geometry";
 import { drawLasso, drawPaper, drawShape, drawStroke, drawText } from "@/lib/notes/render";
-import { getAsset, objectUrlFor, putAsset } from "@/lib/notes/db";
-import { loadPdfDocument, renderPdfPageBitmap } from "@/lib/notes/pdf";
+import { putAsset } from "@/lib/notes/db";
+import { loadStoredPdfDocument, renderPdfPageBitmap } from "@/lib/notes/pdf";
+import { loadAssetImage } from "@/lib/notes/image-cache";
 import { nid } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,23 +36,6 @@ import {
 import { toast } from "sonner";
 
 export const OPEN_IMAGE_PICKER_EVENT = "notes:open-image-picker";
-
-const imageCache = new Map<string, HTMLImageElement>();
-
-function loadImage(id: string, url: string) {
-  const hit = imageCache.get(id);
-  if (hit) return Promise.resolve(hit);
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      imageCache.set(id, img);
-      resolve(img);
-    };
-    img.onerror = () => reject(new Error("Không tải được ảnh"));
-    img.src = url;
-  });
-}
 
 async function readImageSize(blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -85,15 +69,25 @@ export function PageSurface({
   active: boolean;
 }) {
   const globalObjects = useNotesStore((s) => s.objectsByPage[page.id] ?? EMPTY);
-  const [localObjects, setLocalObjects] = useState<import("@/lib/notes/types").CanvasObject[] | null>(null);
-  const localRef = useRef<import("@/lib/notes/types").CanvasObject[] | null>(null);
-  
-  function updateLocalObjects(next: import("@/lib/notes/types").CanvasObject[] | null) {
-      localRef.current = next;
-      setLocalObjects(next);
+  const [localObjects, setLocalObjects] = useState<CanvasObject[] | null>(null);
+  const localRef = useRef<CanvasObject[] | null>(null);
+  const localFrameRef = useRef<number | null>(null);
+
+  function updateLocalObjects(next: CanvasObject[] | null) {
+    localRef.current = next;
+    setLocalObjects(next);
+  }
+
+  function scheduleLocalObjects(next: CanvasObject[]) {
+    localRef.current = next;
+    if (localFrameRef.current !== null) return;
+    localFrameRef.current = window.requestAnimationFrame(() => {
+      localFrameRef.current = null;
+      setLocalObjects(localRef.current);
+    });
   }
   const objects = localObjects ?? globalObjects;
-  
+
   useEffect(() => {
     // When global objects change (e.g. from undo or sync), clear local override
     updateLocalObjects(null);
@@ -104,10 +98,10 @@ export function PageSurface({
   const wrapRef = useRef<HTMLDivElement>(null);
   const staticRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
+  const liveFrameRef = useRef<number | null>(null);
   const renderIdRef = useRef(0);
   const drawing = useRef(false);
-    const erasingNextRef = useRef<CanvasObject[] | null>(null);
-    const dragNextRef = useRef<CanvasObject[] | null>(null);
+  const erasingNextRef = useRef<CanvasObject[] | null>(null);
   const pts = useRef<{ x: number; y: number; p: number }[]>([]);
   const shapeA = useRef<Pt | null>(null);
   const strokeBeforeState = useRef<CanvasObject[] | null>(null);
@@ -120,7 +114,7 @@ export function PageSurface({
   const [selected, setSelected] = useState<string[]>([]);
   const [dropActive, setDropActive] = useState(false);
   const lastInsertPoint = useRef<Pt>({ x: page.width / 2, y: page.height / 2 });
-    const textSaveTimer = useRef<any>(null);
+  const textSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resize = useRef<{
     pointerId: number;
     startX: number;
@@ -131,27 +125,37 @@ export function PageSurface({
     before: CanvasObject[];
   } | null>(null);
   const resizeCleanup = useRef<(() => void) | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const pendingResizeMove = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const drag = useRef<{
     kind: "move" | "lasso";
     last: Pt;
     ids: string[];
   } | null>(null);
 
-  const [isVisible, setIsVisible] = useState(true);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
+  const [isVisible, setIsVisible] = useState(active);
+
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = wrapRef.current;
+    if (!container) return;
+    if (!("IntersectionObserver" in window)) {
+      setIsVisible(true);
+      return;
+    }
     const observer = new IntersectionObserver(
-      (entries) => {
-        setIsVisible(entries[0].isIntersecting);
+      ([entry]) => {
+        setIsVisible(active || entry.isIntersecting);
       },
-      { rootMargin: "1000px" } // Render pages within 1000px of viewport
+      { rootMargin: "800px 0px" },
     );
-    observer.observe(containerRef.current);
+    observer.observe(container);
     return () => observer.disconnect();
-  }, []);
-  
+  }, [active]);
+
   const disp = displaySize(page);
   const cssW = disp.w * zoom;
   const cssH = disp.h * zoom;
@@ -287,6 +291,7 @@ export function PageSurface({
 
   // Draw PDF + paper background onto the base canvas (only when pdf/zoom changes)
   const redrawBase = useCallback(async () => {
+    if (!isVisible) return;
     const canvas = baseRef.current;
     if (!canvas) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -306,22 +311,19 @@ export function PageSurface({
 
     if (notebook?.pdfAssetId && page.pdfPage) {
       try {
-        const asset = await getAsset(notebook.pdfAssetId);
-        if (asset) {
-          const doc = await loadPdfDocument(notebook.pdfAssetId, await asset.blob.arrayBuffer());
-          const bmp = await renderPdfPageBitmap(
-            doc,
-            page.pdfPage,
-            zoom * dpr,
-            page.rotation,
-            notebook.pdfAssetId,
-          );
-          ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-          ctx.restore();
-          applyPageRotation(ctx, page, zoom, dpr);
-        }
+        const doc = await loadStoredPdfDocument(notebook.pdfAssetId);
+        const bmp = await renderPdfPageBitmap(
+          doc,
+          page.pdfPage,
+          zoom * dpr,
+          page.rotation,
+          notebook.pdfAssetId,
+        );
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        applyPageRotation(ctx, page, zoom, dpr);
       } catch {
         /* render paper only */
       }
@@ -330,10 +332,11 @@ export function PageSurface({
     lastPdfAsset.current = notebook?.pdfAssetId ?? undefined;
     lastPage.current = page.pdfPage ?? undefined;
     lastZoom.current = zoom;
-  }, [notebook?.pdfAssetId, page, zoom, cssW, cssH]);
+  }, [notebook?.pdfAssetId, page, zoom, cssW, cssH, isVisible]);
 
   // Draw just the strokes + selection overlay onto staticRef (very fast, no PDF re-render)
   const redrawStrokes = useCallback(async (overrideObjects?: CanvasObject[]) => {
+    if (!isVisible) return;
     const renderId = ++renderIdRef.current;
     const canvas = staticRef.current;
     if (!canvas) return;
@@ -349,24 +352,17 @@ export function PageSurface({
     for (const o of targetObjects) {
       if (o.type === "image") {
         try {
-          const cached = imageCache.get(o.assetId);
-          if (cached) {
-            loadedImages.set(o.id, cached);
-          } else {
-            const asset = await getAsset(o.assetId);
-            if (asset) {
-              const img = await loadImage(o.assetId, objectUrlFor(o.assetId, asset.blob));
-              loadedImages.set(o.id, img);
-            }
-          }
-        } catch {}
+          loadedImages.set(o.id, await loadAssetImage(o.assetId));
+        } catch {
+          // Keep rendering the rest of the page if one embedded image is unavailable.
+        }
       }
     }
 
     if (renderId !== renderIdRef.current) return;
 
     const dpr = sizeCanvases();
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -401,21 +397,33 @@ export function PageSurface({
       ctx.strokeRect(box.x, box.y, box.w, box.h);
       ctx.restore();
     }
-  }, [objects, page, selected, sizeCanvases, zoom]);
+  }, [objects, page, selected, sizeCanvases, zoom, isVisible]);
 
   // Re-render base (PDF) only when PDF asset, page, or zoom changes
   useEffect(() => {
+    if (!isVisible) return;
     const pdfChanged =
       lastPdfAsset.current !== notebook?.pdfAssetId ||
       lastPage.current !== page.pdfPage ||
       Math.abs(lastZoom.current - zoom) > 0.01;
     if (pdfChanged) void redrawBase();
-  }, [notebook?.pdfAssetId, page.pdfPage, zoom, redrawBase]);
+  }, [notebook?.pdfAssetId, page.pdfPage, zoom, redrawBase, isVisible]);
 
   // Re-render strokes whenever objects/selection change (cheap operation)
   useEffect(() => {
-    void redrawStrokes();
-  }, [redrawStrokes]);
+    if (isVisible) void redrawStrokes();
+  }, [redrawStrokes, isVisible]);
+
+  useEffect(() => {
+    if (isVisible) return;
+    renderIdRef.current += 1;
+    baseReady.current = false;
+    for (const canvas of [baseRef.current, staticRef.current, liveRef.current]) {
+      if (!canvas) continue;
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+  }, [isVisible]);
 
   useEffect(() => {
     if (!active) return;
@@ -477,13 +485,55 @@ export function PageSurface({
     const canvas = liveRef.current;
     if (!canvas) return null;
     const dpr = sizeCanvases();
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     applyPageRotation(ctx, page, zoom, dpr);
     return ctx;
   };
+
+  function drawLivePreview() {
+    const ctx = setupLive();
+    if (!ctx) return;
+    if (isPen(tool.name)) {
+      const pen = currentPen();
+      drawStroke(ctx, {
+        id: "live",
+        type: "stroke",
+        tool: pen.kind,
+        color: pen.color,
+        width: pen.width,
+        points: pts.current,
+      });
+      return;
+    }
+    if (isShape(tool.name) && shapeA.current) {
+      const end = pts.current.at(-1);
+      if (!end) return;
+      drawShape(ctx, {
+        id: "live",
+        type: "shape",
+        shape: tool.name as "line" | "arrow" | "rect" | "ellipse",
+        x1: shapeA.current.x,
+        y1: shapeA.current.y,
+        x2: end.x,
+        y2: end.y,
+        color: tool.color,
+        width: tool.width,
+      });
+      return;
+    }
+    drawLasso(ctx, pts.current);
+  }
+
+  function scheduleLivePreview() {
+    if (liveFrameRef.current !== null) return;
+    liveFrameRef.current = window.requestAnimationFrame(() => {
+      liveFrameRef.current = null;
+      drawLivePreview();
+    });
+  }
 
   function commit(next: CanvasObject[]) {
     useNotesStore.getState().commitObjects(page.id, next, true);
@@ -501,10 +551,9 @@ export function PageSurface({
   }
 
   function onPointerDown(ev: React.PointerEvent<HTMLCanvasElement>) {
-      ev.currentTarget.setPointerCapture(ev.pointerId);
     activatePage();
     if (isDrawBlocked(ev.nativeEvent)) return;
-    (ev.target as HTMLCanvasElement).setPointerCapture(ev.pointerId);
+    ev.currentTarget.setPointerCapture(ev.pointerId);
     const p = toPage(ev);
     lastInsertPoint.current = p;
     const pressure = ev.pressure > 0 ? ev.pressure : 0.5;
@@ -559,6 +608,7 @@ export function PageSurface({
 
     if (tool.name === "eraser") {
       drawing.current = true;
+      erasingNextRef.current = null;
       applyEraser(p);
       return;
     }
@@ -592,44 +642,18 @@ export function PageSurface({
         const dy = p.y - drag.current.last.y;
         drag.current.last = p;
         const ids = new Set(drag.current.ids);
-        const next = (useNotesStore.getState().objectsByPage[page.id] ?? objects).map((o) =>
+        const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
+        const next = current.map((o) =>
           ids.has(o.id) ? translateObject(o, dx, dy) : o,
         );
-        updateLocalObjects(next);
+        scheduleLocalObjects(next);
         continue;
       }
       if (drag.current?.kind === "lasso" || isPen(tool.name) || isShape(tool.name)) {
         const last = pts.current[pts.current.length - 1];
         if (last && dist(last, p) < 1.0 / zoom) continue;
         pts.current.push({ ...p, p: pressure });
-        const ctx = setupLive();
-        if (!ctx) continue;
-        if (isPen(tool.name)) {
-          const pen = currentPen();
-          drawStroke(ctx, {
-            id: "live",
-            type: "stroke",
-            tool: pen.kind,
-            color: pen.color,
-            width: pen.width,
-            points: pts.current,
-          });
-        } else if (isShape(tool.name) && shapeA.current) {
-          const b = pts.current[pts.current.length - 1]!;
-          drawShape(ctx, {
-            id: "live",
-            type: "shape",
-            shape: tool.name as "line" | "arrow" | "rect" | "ellipse",
-            x1: shapeA.current.x,
-            y1: shapeA.current.y,
-            x2: b.x,
-            y2: b.y,
-            color: tool.color,
-            width: tool.width,
-          });
-        } else {
-          drawLasso(ctx, pts.current);
-        }
+        scheduleLivePreview();
       }
     }
   }
@@ -637,6 +661,10 @@ export function PageSurface({
   function onPointerUp(ev: React.PointerEvent<HTMLCanvasElement>) {
     if (!drawing.current) return;
     drawing.current = false;
+    if (liveFrameRef.current !== null) {
+      window.cancelAnimationFrame(liveFrameRef.current);
+      liveFrameRef.current = null;
+    }
     const ctx = setupLive();
     ctx?.clearRect?.(-9999, -9999, 20000, 20000);
     setupLive();
@@ -647,13 +675,14 @@ export function PageSurface({
       useNotesStore
         .getState()
         .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      erasingNextRef.current = null;
       strokeBeforeState.current = null;
       return;
     }
 
     if (drag.current?.kind === "move") {
       drag.current = null;
-      const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+      const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
       useNotesStore
         .getState()
         .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
@@ -712,7 +741,8 @@ export function PageSurface({
 
   function applyEraser(p: Pt) {
     const { eraserMode, eraserWidth } = useNotesStore.getState().tool;
-    const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+    const current =
+      erasingNextRef.current ?? localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
     const next: CanvasObject[] = [];
     let changed = false;
     for (const o of current) {
@@ -734,8 +764,10 @@ export function PageSurface({
         next.push(...erasePartial(o, p, eraserWidth / 2));
       }
     }
-    // Apply silently (non-undoable) during move; committed as one undo step on pointer-up
-    if (changed) useNotesStore.getState().commitObjects(page.id, next, false);
+    if (changed) {
+      erasingNextRef.current = next;
+      scheduleLocalObjects(next);
+    }
   }
 
   useEffect(() => {
@@ -776,6 +808,10 @@ export function PageSurface({
   useEffect(
     () => () => {
       resizeCleanup.current?.();
+      if (liveFrameRef.current !== null) window.cancelAnimationFrame(liveFrameRef.current);
+      if (localFrameRef.current !== null) window.cancelAnimationFrame(localFrameRef.current);
+      if (resizeFrameRef.current !== null) window.cancelAnimationFrame(resizeFrameRef.current);
+      if (textSaveTimer.current !== null) clearTimeout(textSaveTimer.current);
     },
     [],
   );
@@ -795,10 +831,28 @@ export function PageSurface({
     };
     const onMove = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault();
-      updateResize(moveEvent.pointerId, moveEvent.clientX, moveEvent.clientY);
+      pendingResizeMove.current = {
+        pointerId: moveEvent.pointerId,
+        clientX: moveEvent.clientX,
+        clientY: moveEvent.clientY,
+      };
+      if (resizeFrameRef.current !== null) return;
+      resizeFrameRef.current = window.requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        const pending = pendingResizeMove.current;
+        pendingResizeMove.current = null;
+        if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY);
+      });
     };
     const onUp = (upEvent: PointerEvent) => {
       upEvent.preventDefault();
+      if (resizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
+      const pending = pendingResizeMove.current;
+      pendingResizeMove.current = null;
+      if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY);
       finishResize(upEvent.pointerId);
     };
     window.addEventListener("pointermove", onMove, { passive: false });
@@ -952,7 +1006,7 @@ export function PageSurface({
           <button
             type="button"
             className="pointer-events-auto absolute -top-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
-            aria-label="K?o ?? ??i k?ch th??c"
+            aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "tl")}
           >
             <MoveDiagonal2 className="size-3.5 rotate-90" />
@@ -960,7 +1014,7 @@ export function PageSurface({
           <button
             type="button"
             className="pointer-events-auto absolute -top-3 -right-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
-            aria-label="K?o ?? ??i k?ch th??c"
+            aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "tr")}
           >
             <MoveDiagonal2 className="size-3.5" />
@@ -968,7 +1022,7 @@ export function PageSurface({
           <button
             type="button"
             className="pointer-events-auto absolute -bottom-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
-            aria-label="K?o ?? ??i k?ch th??c"
+            aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "bl")}
           >
             <MoveDiagonal2 className="size-3.5" />
@@ -976,7 +1030,7 @@ export function PageSurface({
           <button
             type="button"
             className="pointer-events-auto absolute -right-3 -bottom-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
-            aria-label="K?o ?? ??i k?ch th??c"
+            aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "br")}
           >
             <MoveDiagonal2 className="size-3.5 rotate-90" />
@@ -987,7 +1041,7 @@ export function PageSurface({
           <textarea
             autoFocus
             rows={2}
-            placeholder="Nh?p n?i dung?"
+            placeholder="Nhập nội dung…"
             className="absolute resize overflow-auto rounded-md border-2 border-accent bg-surface-2/95 p-2 text-fg outline-none shadow-lg"
             style={{
               left: editing.x * zoom,

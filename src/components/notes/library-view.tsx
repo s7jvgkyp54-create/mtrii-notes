@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { DropdownMenu, MenuItem, MenuSep } from "@/components/ui/dropdown-menu";
 import { Dialog } from "@/components/ui/dialog";
 import { cn, formatBytes, relativeVi } from "@/lib/utils";
-import { useNotesStore, visibleNotebooks } from "@/lib/notes/store";
+import { useNotesStore } from "@/lib/notes/store";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import type { Folder, LibrarySection, Notebook } from "@/lib/notes/types";
 import { NotesMark } from "./logo";
@@ -71,24 +71,31 @@ export function LibraryView() {
   const [dragging, setDragging] = useState(false);
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const libraryScrollRef = useRef<HTMLDivElement>(null);
   const [renderCount, setRenderCount] = useState(50);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setRenderCount(50); // reset on section change
-  }, [section, folderId, debouncedQuery, sort]);
+  const libraryStateKey = `notes.library.view.${section}.${folderId ?? "root"}.${layout}.${sort}.${debouncedQuery}`;
 
   useEffect(() => {
-    if (!loadMoreRef.current) return;
-    observerRef.current = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) {
-        setRenderCount((c) => c + 50);
-      }
+    let restoredCount = 50;
+    let restoredScroll = 0;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(libraryStateKey) || "null") as
+        | { renderCount?: number; scrollTop?: number }
+        | null;
+      restoredCount = Math.max(50, Number(saved?.renderCount) || 50);
+      restoredScroll = Math.max(0, Number(saved?.scrollTop) || 0);
+    } catch {
+      // Scroll restoration is optional.
+    }
+    setRenderCount(restoredCount);
+    const frame = requestAnimationFrame(() => {
+      if (libraryScrollRef.current) libraryScrollRef.current.scrollTop = restoredScroll;
     });
-    observerRef.current.observe(loadMoreRef.current);
-    return () => observerRef.current?.disconnect();
-  }, [items]);
+    return () => cancelAnimationFrame(frame);
+  }, [libraryStateKey]);
 
   const items = useMemo(() => {
     let list = notebooks.filter((n) => !n.deletedAt);
@@ -111,6 +118,15 @@ export function LibraryView() {
 
     return list;
   }, [notebooks, section, folderId, debouncedQuery, sort]);
+
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    observerRef.current = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) setRenderCount((count) => count + 50);
+    });
+    observerRef.current.observe(loadMoreRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [items]);
 
   const visibleFolders = useMemo(() => {
     if (section !== "all") return [];
@@ -362,16 +378,16 @@ export function LibraryView() {
               {section === "all" ? (
                 <Button variant="outline" onClick={() => setFolderOpen(true)} className="gap-1.5">
                   <FolderPlus className="size-4" />
-                  <span className="hidden sm:inline">Thư mục</span>
+                  <span className="hidden 2xl:inline">Thư mục</span>
                 </Button>
               ) : null}
               <Button variant="outline" onClick={() => fileRef.current?.click()}>
                 <FileUp />
-                <span className="hidden sm:inline">Nhập PDF</span>
+                <span className="hidden 2xl:inline">Nhập PDF</span>
               </Button>
               <Button variant="outline" onClick={() => setDriveOpen(true)}>
                 <Cloud />
-                <span className="hidden sm:inline">Nhập Drive</span>
+                <span className="hidden 2xl:inline">Nhập Drive</span>
               </Button>
               <Button onClick={() => setCreateOpen(true)}>
                 <Plus />
@@ -393,7 +409,20 @@ export function LibraryView() {
           ) : null}
         </header>
 
-        <div className="flex-1 overflow-auto p-4 pb-24 md:p-6 md:pb-6">
+        <div
+          ref={libraryScrollRef}
+          className="flex-1 overflow-auto p-4 pb-24 md:p-6 md:pb-6"
+          onScroll={(event) => {
+            try {
+              sessionStorage.setItem(
+                libraryStateKey,
+                JSON.stringify({ renderCount, scrollTop: event.currentTarget.scrollTop }),
+              );
+            } catch {
+              // The library remains usable when session storage is unavailable.
+            }
+          }}
+        >
           {/* Breadcrumb Navigation when inside a folder */}
           {folderId && currentFolder ? (
             <div className="mb-5 flex items-center justify-between">
@@ -734,7 +763,7 @@ function FolderMenu({ folder }: { folder: Folder }) {
           <Button
             variant="ghost"
             size="icon"
-            className="size-7 bg-surface-2/90"
+            className="size-10 bg-surface-2/90"
             aria-label="Tùy chọn thư mục"
           >
             <MoreHorizontal className="size-3.5" />
@@ -865,7 +894,7 @@ function NotebookTile({
   selected: boolean;
 }) {
   return (
-    <article className="group relative">
+    <article className="library-card group relative">
       <button type="button" onClick={onOpen} className="block w-full text-left cursor-pointer">
         <div
           className={cn(
@@ -987,7 +1016,7 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
           <Button
             variant="icon"
             size="icon"
-            className="size-8 bg-surface-2/80 shadow-sm"
+            className="size-10 bg-surface-2/80 shadow-sm"
             aria-label="Tùy chọn sổ"
           >
             <MoreHorizontal className="size-4" />
@@ -1009,7 +1038,7 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
               {notebook.favorite ? "Bỏ yêu thích" : "Yêu thích"}
             </MenuItem>
             <MenuItem onSelect={() => void s.exportPdf(notebook.id)}>Xuất PDF</MenuItem>
-            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id).then(() => toast.success("?? xu?t b?n sao")).catch((e) => toast.error(String(e)))}>
+            <MenuItem onSelect={() => void s.exportBackup("notebook", notebook.id).then(() => toast.success("Đã xuất bản sao")).catch((e) => toast.error(String(e)))}>
               Xuất bản sao sổ
             </MenuItem>
             <MenuSep />

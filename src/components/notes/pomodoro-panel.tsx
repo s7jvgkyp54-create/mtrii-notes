@@ -1,15 +1,12 @@
-import { useState } from "react";
 import { useNotesStore } from "@/lib/notes/store";
 import { startPomodoro, pausePomodoro, resumePomodoro, cancelPomodoro, getRemainingTime } from "@/lib/notes/pomodoro";
-import { X, Play, Pause, Square, Settings } from "lucide-react";
+import { Play, Pause, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 
 export function PomodoroPanel({ onClose }: { onClose: () => void }) {
   const session = useNotesStore((s) => s.pomodoroSession);
-  const tick = useNotesStore((s) => s.pomodoroTick);
+  useNotesStore((s) => s.pomodoroTick);
   const settings = useNotesStore((s) => s.settings.pomodoro);
   
   const remaining = getRemainingTime();
@@ -17,11 +14,7 @@ export function PomodoroPanel({ onClose }: { onClose: () => void }) {
   const seconds = Math.floor((remaining % 60000) / 1000);
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Pomodoro</DialogTitle>
-        </DialogHeader>
+    <Dialog open onOpenChange={(open) => !open && onClose()} title="Pomodoro" className="sm:max-w-md">
         <div className="flex flex-col items-center py-6">
            <div className="text-6xl font-mono font-bold mb-4">
               {minutes}:{seconds.toString().padStart(2, "0")}
@@ -34,7 +27,7 @@ export function PomodoroPanel({ onClose }: { onClose: () => void }) {
                ) : (
                   <Button variant="outline" onClick={() => void pausePomodoro()}><Pause className="mr-2 h-4 w-4" /> Tạm dừng</Button>
                )}
-               <Button variant="destructive" onClick={async () => {
+               <Button variant="danger" onClick={async () => {
                    if (confirm("Bạn có chắc chắn muốn hủy phiên này?")) {
                        await cancelPomodoro();
                    }
@@ -44,7 +37,7 @@ export function PomodoroPanel({ onClose }: { onClose: () => void }) {
              </div>
            ) : (
              <div className="flex gap-4">
-                <Button onClick={() => void startPomodoro("focus")}>Bắt đầu Tập trung (25m)</Button>
+                 <Button onClick={() => void startPomodoro("focus")}>Bắt đầu tập trung ({settings.focusDuration}m)</Button>
                 <Button variant="outline" onClick={() => void startPomodoro("shortBreak")}>Nghỉ ngắn</Button>
              </div>
            )}
@@ -53,7 +46,6 @@ export function PomodoroPanel({ onClose }: { onClose: () => void }) {
               Cài đặt (25-5-15) - Tự động đồng bộ và khôi phục khi tắt máy
            </div>
         </div>
-      </DialogContent>
     </Dialog>
   );
 }

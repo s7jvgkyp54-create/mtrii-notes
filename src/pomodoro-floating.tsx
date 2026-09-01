@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
 import { Play, Pause, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PomodoroSession } from "@/lib/notes/types";
@@ -10,7 +9,7 @@ import "./styles.css"; // Ensure styles are loaded
 
 export function PomodoroFloatingApp() {
   const [session, setSession] = useState<PomodoroSession | null>(null);
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
     const unlisten = listen("pomodoro-sync", (event: any) => {

@@ -48,7 +48,6 @@ async function handleSessionComplete(session: PomodoroSession) {
      audio.play().catch(console.error);
   }
   // 1. Play sound & Notify
-  const settings = useNotesStore.getState().settings.pomodoro;
   if (settings.notificationsEnabled) {
      try {
        const { isPermissionGranted, requestPermission, sendNotification } = await import("@tauri-apps/plugin-notification");

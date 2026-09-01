@@ -95,10 +95,11 @@ async fn download_drive_file(
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -107,9 +108,12 @@ use uuid::Uuid;
 struct StoragePaths {
     root: PathBuf,
     database: PathBuf,
+    mirror_database: PathBuf,
     assets: PathBuf,
     backups: PathBuf,
 }
+
+static STORAGE_PATHS: OnceLock<StoragePaths> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,11 +163,30 @@ struct ImportPayload {
     app_meta: Option<Value>,
 }
 
+#[derive(Debug, Deserialize)]
+struct JsonWrite {
+    entity: String,
+    id: String,
+    value: Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartupData {
+    folders: Vec<Value>,
+    notebooks: Vec<Value>,
+    settings: Option<Value>,
+    meta: Option<Value>,
+}
+
 fn err<E: std::fmt::Display>(error: E) -> String {
     error.to_string()
 }
 
 fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
+    if let Some(cached) = STORAGE_PATHS.get() {
+        return Ok(cached.clone());
+    }
     // Partition 1: Permanent Isolated Vault (AppData/Roaming/NotesData)
     // Completely separated from installation folder, app identifiers, or uninstallers.
     let base_roaming = app.path().app_data_dir().map_err(err)?;
@@ -240,37 +263,29 @@ fn paths(app: &AppHandle) -> Result<StoragePaths, String> {
         }
     }
 
-    // Partition 2: Self-Healing Mirror Replication
-    // If main DB exists, maintain a real-time mirror copy in partition 2
-    if db_path.exists() {
-        if let Ok(meta) = fs::metadata(&db_path) {
-            if meta.len() > 0 {
-                let _ = fs::copy(&db_path, &mirror_db);
-            }
-        }
-    } else if mirror_db.exists() {
+    // Partition 2: restore only during initialization. A fresh mirror is made
+    // after pending writes are flushed so the WAL is checkpointed first.
+    if !db_path.exists() && mirror_db.exists() {
         // Self-Healing: restore from Partition 2 mirror if primary was somehow missing
         let _ = fs::copy(&mirror_db, &db_path);
     }
 
-    Ok(StoragePaths {
+    let resolved = StoragePaths {
         database: db_path,
+        mirror_database: mirror_db,
         root,
         assets,
         backups,
-    })
+    };
+    let _ = STORAGE_PATHS.set(resolved.clone());
+    Ok(resolved)
 }
 
-fn connect(app: &AppHandle) -> Result<Connection, String> {
-    let p = paths(app)?;
-    let connection = Connection::open(p.database).map_err(err)?;
-    connection
+fn run_migrations(connection: &mut Connection) -> Result<(), String> {
+    let transaction = connection.transaction().map_err(err)?;
+    transaction
         .execute_batch(
             r#"
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA foreign_keys = ON;
-
             CREATE TABLE IF NOT EXISTS folders (
               id TEXT PRIMARY KEY,
               data TEXT NOT NULL
@@ -321,6 +336,78 @@ fn connect(app: &AppHandle) -> Result<Connection, String> {
             "#,
         )
         .map_err(err)?;
+    transaction.commit().map_err(err)?;
+
+    let has_v2 = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM migrations WHERE version=2)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(err)?;
+    if !has_v2 {
+        let transaction = connection.transaction().map_err(err)?;
+        transaction
+            .execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS tombstones (
+                  id TEXT PRIMARY KEY,
+                  deleted_at INTEGER NOT NULL,
+                  data TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS pomodoro_history (
+                  id TEXT PRIMARY KEY,
+                  started_at INTEGER NOT NULL,
+                  data TEXT NOT NULL
+                );
+                INSERT INTO migrations(version) VALUES (2);
+                "#,
+            )
+            .map_err(err)?;
+        transaction.commit().map_err(err)?;
+    }
+
+    let has_v3 = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM migrations WHERE version=3)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(err)?;
+    if !has_v3 {
+        let transaction = connection.transaction().map_err(err)?;
+        transaction
+            .execute_batch(
+                r#"
+                CREATE INDEX IF NOT EXISTS backups_by_created_at
+                  ON backups(created_at DESC);
+                CREATE INDEX IF NOT EXISTS pomodoro_history_by_started_at
+                  ON pomodoro_history(started_at DESC);
+                INSERT INTO migrations(version) VALUES (3);
+                "#,
+            )
+            .map_err(err)?;
+        transaction.commit().map_err(err)?;
+    }
+    Ok(())
+}
+
+fn connect(app: &AppHandle) -> Result<Connection, String> {
+    let p = paths(app)?;
+    let mut connection = Connection::open(p.database).map_err(err)?;
+    connection
+        .busy_timeout(Duration::from_secs(5))
+        .map_err(err)?;
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .map_err(err)?;
+    run_migrations(&mut connection)?;
     Ok(connection)
 }
 
@@ -379,6 +466,30 @@ fn put_value(connection: &Connection, entity: &str, id: &str, value: &Value) -> 
                 )
                 .map_err(err)?
         }
+        "tombstones" => {
+            let deleted_at = value
+                .get("deletedAt")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "Thiếu thời gian xóa".to_string())?;
+            connection
+                .execute(
+                    "INSERT INTO tombstones(id, deleted_at, data) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET deleted_at=excluded.deleted_at, data=excluded.data",
+                    params![id, deleted_at, data],
+                )
+                .map_err(err)?
+        }
+        "pomodoroHistory" => {
+            let started_at = value
+                .get("startTime")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "Thiếu thời gian Pomodoro".to_string())?;
+            connection
+                .execute(
+                    "INSERT INTO pomodoro_history(id, started_at, data) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET started_at=excluded.started_at, data=excluded.data",
+                    params![id, started_at, data],
+                )
+                .map_err(err)?
+        }
         _ => return Err("Loại dữ liệu không hợp lệ".to_string()),
     };
     Ok(())
@@ -403,9 +514,37 @@ fn query_json(
             .collect::<Result<Vec<_>, _>>()
             .map_err(err)?
     };
-    rows.into_iter()
-        .map(|row| serde_json::from_str(&row).map_err(err))
-        .collect()
+    let mut values = Vec::with_capacity(rows.len());
+    for row in rows {
+        match serde_json::from_str(&row) {
+            Ok(value) => values.push(value),
+            Err(error) => {
+                // Preserve the raw row in SQLite but isolate it from startup.
+                // Never print the row itself because it may contain private notes.
+                eprintln!("[notes] isolated invalid JSON row: {error}");
+            }
+        }
+    }
+    Ok(values)
+}
+
+fn query_kv_value(connection: &Connection, key: &str) -> Result<Option<Value>, String> {
+    let data = connection
+        .query_row("SELECT data FROM kv WHERE key=?1", params![key], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+        .map_err(err)?;
+    let Some(contents) = data else {
+        return Ok(None);
+    };
+    match serde_json::from_str(&contents) {
+        Ok(value) => Ok(Some(value)),
+        Err(error) => {
+            eprintln!("[notes] isolated invalid kv value for {key}: {error}");
+            Ok(None)
+        }
+    }
 }
 
 fn safe_id(id: &str) -> Result<(), String> {
@@ -527,6 +666,8 @@ fn native_get_all(app: AppHandle, entity: String) -> Result<Vec<Value>, String> 
         "pages" => "SELECT data FROM pages ORDER BY notebook_id, sort_index",
         "pageObjects" => "SELECT data FROM page_objects",
         "bookmarks" => "SELECT data FROM bookmarks",
+        "tombstones" => "SELECT data FROM tombstones ORDER BY deleted_at",
+        "pomodoroHistory" => "SELECT data FROM pomodoro_history ORDER BY started_at",
         _ => return Err("Loại dữ liệu không hợp lệ".to_string()),
     };
     query_json(&connection, sql, None)
@@ -549,9 +690,50 @@ fn native_get_by_notebook(
 }
 
 #[tauri::command]
+fn native_load_startup_data(app: AppHandle) -> Result<StartupData, String> {
+    let connection = connect(&app)?;
+    Ok(StartupData {
+        folders: query_json(&connection, "SELECT data FROM folders", None)?,
+        notebooks: query_json(&connection, "SELECT data FROM notebooks", None)?,
+        settings: query_kv_value(&connection, "settings")?,
+        meta: query_kv_value(&connection, "meta")?,
+    })
+}
+
+#[tauri::command]
 fn native_put_json(app: AppHandle, entity: String, id: String, value: Value) -> Result<(), String> {
     let connection = connect(&app)?;
     put_value(&connection, &entity, &id, &value)
+}
+
+#[tauri::command]
+fn native_put_json_batch(app: AppHandle, writes: Vec<JsonWrite>) -> Result<(), String> {
+    let mut connection = connect(&app)?;
+    put_values_batch(&mut connection, writes)
+}
+
+fn put_values_batch(connection: &mut Connection, writes: Vec<JsonWrite>) -> Result<(), String> {
+    if writes.is_empty() {
+        return Ok(());
+    }
+    let transaction = connection.transaction().map_err(err)?;
+    for write in writes {
+        put_value(&transaction, &write.entity, &write.id, &write.value)?;
+    }
+    transaction.commit().map_err(err)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn native_flush_storage(app: AppHandle) -> Result<(), String> {
+    let storage = paths(&app)?;
+    let connection = connect(&app)?;
+    connection
+        .execute_batch("PRAGMA wal_checkpoint(FULL);")
+        .map_err(err)?;
+    drop(connection);
+    let bytes = fs::read(&storage.database).map_err(err)?;
+    atomic_write(&storage.mirror_database, &bytes)
 }
 
 #[tauri::command]
@@ -573,6 +755,10 @@ fn native_delete(app: AppHandle, entity: String, id: String) -> Result<(), Strin
             connection.execute("DELETE FROM page_objects WHERE page_id=?1", params![id])
         }
         "bookmarks" => connection.execute("DELETE FROM bookmarks WHERE id=?1", params![id]),
+        "tombstones" => connection.execute("DELETE FROM tombstones WHERE id=?1", params![id]),
+        "pomodoroHistory" => {
+            connection.execute("DELETE FROM pomodoro_history WHERE id=?1", params![id])
+        }
         _ => return Err("Loại dữ liệu không hợp lệ".to_string()),
     }
     .map_err(err)?;
@@ -582,14 +768,7 @@ fn native_delete(app: AppHandle, entity: String, id: String) -> Result<(), Strin
 #[tauri::command]
 fn native_get_kv(app: AppHandle, key: String) -> Result<Option<Value>, String> {
     let connection = connect(&app)?;
-    let data = connection
-        .query_row("SELECT data FROM kv WHERE key=?1", params![key], |row| {
-            row.get::<_, String>(0)
-        })
-        .optional()
-        .map_err(err)?;
-    data.map(|json| serde_json::from_str(&json).map_err(err))
-        .transpose()
+    query_kv_value(&connection, &key)
 }
 
 #[tauri::command]
@@ -836,6 +1015,90 @@ fn directory_size(path: &Path) -> u64 {
 }
 
 #[tauri::command]
+fn native_system_diagnostics(app: AppHandle) -> Result<Value, String> {
+    let storage = paths(&app)?;
+    let database_bytes = fs::metadata(&storage.database)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let migrations = Connection::open(&storage.database)
+        .ok()
+        .and_then(|connection| {
+            let mut statement = connection
+                .prepare("SELECT version FROM migrations ORDER BY version")
+                .ok()?;
+            let result = statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .ok()?
+                .collect::<Result<Vec<_>, _>>()
+                .ok();
+            result
+        })
+        .unwrap_or_default();
+    let write_probe = storage.root.join(format!(".write-check-{}", Uuid::new_v4()));
+    let writable = fs::write(&write_probe, b"ok")
+        .and_then(|_| fs::remove_file(&write_probe))
+        .is_ok();
+    let webview_version = tauri::webview_version().ok();
+    #[cfg(target_os = "windows")]
+    let platform = {
+        let mut command = std::process::Command::new("cmd");
+        command.creation_flags(CREATE_NO_WINDOW);
+        command
+            .args(["/C", "ver"])
+            .output()
+            .ok()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "Windows".to_string())
+    };
+    #[cfg(not(target_os = "windows"))]
+    let platform = std::env::consts::OS.to_string();
+    Ok(json!({
+        "platform": platform,
+        "appVersion": app.package_info().version.to_string(),
+        "webviewVersion": webview_version,
+        "databaseBytes": database_bytes,
+        "storageBytes": directory_size(&storage.root),
+        "migrations": migrations,
+        "writable": writable,
+    }))
+}
+
+#[tauri::command]
+fn native_export_diagnostics(app: AppHandle, contents: String) -> Result<String, String> {
+    if contents.len() > 1024 * 1024 {
+        return Err("Nhật ký chẩn đoán vượt quá giới hạn 1 MB".to_string());
+    }
+    let storage = paths(&app)?;
+    let diagnostics = storage.root.join("diagnostics");
+    fs::create_dir_all(&diagnostics).map_err(err)?;
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(err)?
+        .as_secs();
+    let file_name = format!("notes-diagnostic-{timestamp}.json");
+    atomic_write(&diagnostics.join(&file_name), contents.as_bytes())?;
+
+    let mut logs = fs::read_dir(&diagnostics)
+        .map_err(err)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+        .collect::<Vec<_>>();
+    logs.sort_by_key(|entry| {
+        std::cmp::Reverse(
+            entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH),
+        )
+    });
+    for old in logs.into_iter().skip(10) {
+        let _ = fs::remove_file(old.path());
+    }
+    Ok(file_name)
+}
+
+#[tauri::command]
 fn native_storage_usage(app: AppHandle) -> Result<u64, String> {
     Ok(directory_size(&paths(&app)?.root))
 }
@@ -854,6 +1117,24 @@ fn native_open_data_folder(app: AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = root;
+        Err("Chức năng này chỉ dành cho Windows".to_string())
+    }
+}
+
+#[tauri::command]
+fn native_open_backup_folder(app: AppHandle) -> Result<(), String> {
+    let backups = paths(&app)?.backups;
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(backups)
+            .spawn()
+            .map_err(err)?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = backups;
         Err("Chức năng này chỉ dành cho Windows".to_string())
     }
 }
@@ -964,7 +1245,10 @@ pub fn run() {
             native_initialize,
             native_get_all,
             native_get_by_notebook,
+            native_load_startup_data,
             native_put_json,
+            native_put_json_batch,
+            native_flush_storage,
             native_delete,
             native_get_kv,
             native_put_kv,
@@ -978,11 +1262,134 @@ pub fn run() {
             native_delete_backup,
             native_import_dump,
             native_storage_usage,
+            native_system_diagnostics,
+            native_export_diagnostics,
             native_open_data_folder,
+            native_open_backup_folder,
             native_open_browser_url,
             native_install_update,
             native_download_and_install_update,
         ])
         .run(tauri::generate_context!())
         .expect("Không thể khởi động Notes");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrations_create_optional_tables_and_commit_versions() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        run_migrations(&mut connection).expect("run migrations");
+        let versions = {
+            let mut statement = connection
+                .prepare("SELECT version FROM migrations ORDER BY version")
+                .expect("prepare versions");
+            statement
+                .query_map([], |row| row.get::<_, i64>(0))
+                .expect("query versions")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("collect versions")
+        };
+        assert_eq!(versions, vec![1, 2, 3]);
+        for table in ["tombstones", "pomodoro_history"] {
+            let exists: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .expect("check table");
+            assert!(exists, "missing {table}");
+        }
+    }
+
+    #[test]
+    fn invalid_json_rows_are_isolated_without_deletion() {
+        let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        connection
+            .execute("CREATE TABLE records(data TEXT NOT NULL)", [])
+            .expect("create records");
+        connection
+            .execute("INSERT INTO records(data) VALUES (?1), (?2)", params![r#"{"id":"ok"}"#, "{broken"])
+            .expect("insert records");
+        let values = query_json(&connection, "SELECT data FROM records", None).expect("query json");
+        assert_eq!(values, vec![json!({ "id": "ok" })]);
+        let row_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+            .expect("count rows");
+        assert_eq!(row_count, 2, "quarantine must not delete the invalid row");
+    }
+
+    #[test]
+    fn pomodoro_history_round_trips_after_migration() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        run_migrations(&mut connection).expect("run migrations");
+        let value = json!({
+            "id": "timer-1",
+            "startTime": 1234,
+            "endTime": 2345,
+            "durationMs": 1111,
+            "phase": "focus",
+            "status": "completed",
+            "taskName": null,
+            "notebookId": null,
+            "pageId": null
+        });
+        put_value(&connection, "pomodoroHistory", "timer-1", &value).expect("store history");
+        let values = query_json(
+            &connection,
+            "SELECT data FROM pomodoro_history ORDER BY started_at",
+            None,
+        )
+        .expect("load history");
+        assert_eq!(values, vec![value]);
+    }
+
+    #[test]
+    fn batch_write_rolls_back_every_row_when_one_value_is_invalid() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        run_migrations(&mut connection).expect("run migrations");
+        let writes = vec![
+            JsonWrite {
+                entity: "pages".into(),
+                id: "page-ok".into(),
+                value: json!({ "id": "page-ok", "notebookId": "book-1", "index": 0 }),
+            },
+            JsonWrite {
+                entity: "pages".into(),
+                id: "page-invalid".into(),
+                value: json!({ "id": "page-invalid", "index": 1 }),
+            },
+        ];
+        assert!(put_values_batch(&mut connection, writes).is_err());
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+            .expect("count pages");
+        assert_eq!(count, 0, "a failed batch must roll back all earlier rows");
+    }
+
+    #[test]
+    fn large_library_fixture_round_trips_two_thousand_notebooks() {
+        let mut connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        run_migrations(&mut connection).expect("run migrations");
+        let writes = (0..2_000)
+            .map(|index| JsonWrite {
+                entity: "notebooks".into(),
+                id: format!("book-{index}"),
+                value: json!({
+                    "id": format!("book-{index}"),
+                    "name": format!("Fixture {index}"),
+                    "updatedAt": index,
+                    "favorite": index % 7 == 0,
+                    "deletedAt": Value::Null
+                }),
+            })
+            .collect();
+        put_values_batch(&mut connection, writes).expect("store fixture");
+        let values = query_json(&connection, "SELECT data FROM notebooks", None)
+            .expect("read fixture");
+        assert_eq!(values.len(), 2_000);
+    }
 }

@@ -150,6 +150,15 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "0.0.0.0",
     port: 8080,
     strictPort: true,
+    watch: {
+      ignored: [
+        "**/.vercel/**",
+        "**/artifacts/**",
+        "**/dist-desktop/**",
+        "**/screenshots/**",
+        "**/src-tauri/target/**",
+      ],
+    },
   },
   preview: {
     host: "127.0.0.1",

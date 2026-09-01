@@ -3,6 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "@/components/ui/sonner";
 import { AppBoot } from "@/components/notes/app-boot";
+import { AppErrorBoundary } from "@/components/notes/app-error-boundary";
 import { NotesNavigationProvider, type NotesDestination } from "@/lib/notes/navigation";
 import appCss from "../styles.css?url";
 
@@ -22,12 +23,6 @@ export const Route = createRootRoute({
       { rel: "stylesheet", href: appCss },
       { rel: "manifest", href: "/__grok/manifest.webmanifest" },
       { rel: "apple-touch-icon", href: "/__grok/icon-180.png" },
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap",
-      },
     ],
   }),
   component: RootDocument,
@@ -45,11 +40,13 @@ function RootDocument() {
       <body>
         <PreviewHostBridge />
         <AuthProvider>
-          <AppBoot>
-            <NotesNavigationProvider navigate={navigate}>
-              <Outlet />
-            </NotesNavigationProvider>
-          </AppBoot>
+          <AppErrorBoundary>
+            <AppBoot>
+              <NotesNavigationProvider navigate={navigate}>
+                <Outlet />
+              </NotesNavigationProvider>
+            </AppBoot>
+          </AppErrorBoundary>
         </AuthProvider>
         <Toaster />
         <Scripts />

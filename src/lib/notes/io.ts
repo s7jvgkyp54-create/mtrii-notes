@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import JSZip from "jszip";
 import {
@@ -12,9 +12,9 @@ import {
   type Notebook,
   type PageRecord,
 } from "./types";
-import { dumpAll, getAsset, objectUrlFor } from "./db";
+import { dumpAll, getAsset } from "./db";
 import { sha256Hex } from "@/lib/utils";
-import { strokeToSvgPath, drawStroke, drawShape, drawText } from "./render";
+import { strokeToSvgPath } from "./render";
 
 export const BACKUP_README = `Định dạng sao lưu Notes (.notesbackup)
 ====================================
@@ -44,10 +44,6 @@ function hexRgb(hex: string) {
   );
 }
 
-function flipY(y: number, pageH: number) {
-  return pageH - y;
-}
-
 // Rasterize all annotations (strokes, shapes, text, images) onto a canvas
 // then embed the result as a PNG layer into the PDF page.
 // This approach guarantees the exported PDF is always viewable.
@@ -62,7 +58,6 @@ async function drawObjectsOnPdfPage(
 ) {
   if (!objects.length) return;
   for (const o of objects) {
-      if (Number.isNaN(o.x) || Number.isNaN(o.y) || !Number.isFinite(o.x) || !Number.isFinite(o.y)) continue;
     if (o.type === "stroke") {
       const path = strokeToSvgPath(o);
       if (path) {
@@ -105,7 +100,9 @@ async function drawObjectsOnPdfPage(
           width: o.w,
           height: o.h,
         });
-      } catch {}
+      } catch {
+        // Skip a single unreadable image while preserving the rest of the export.
+      }
     }
   }
 }
@@ -121,7 +118,7 @@ export async function exportNotebookPdf(opts: {
   let pdf: PDFDocument;
   if (notebook.pdfAssetId) {
     const asset = await getAsset(notebook.pdfAssetId);
-    if (!asset) throw new Error("Thi?u t?p PDF g?c trong kho.");
+    if (!asset) throw new Error("Thiếu tệp PDF gốc trong kho.");
     pdf = await PDFDocument.load(await asset.blob.arrayBuffer(), { ignoreEncryption: true });
   } else {
     pdf = await PDFDocument.create();
@@ -145,7 +142,6 @@ export async function exportNotebookPdf(opts: {
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]!;
     const pdfPage = pdf.getPage(Math.min(i, pdf.getPageCount() - 1));
-    const pageH = pdfPage.getHeight();
     const objs = objects[page.id] ?? [];
     await drawObjectsOnPdfPage(pdf, pdfPage, objs, pdfPage.getWidth(), pdfPage.getHeight(), imageCache, customFont);
   }
@@ -258,6 +254,7 @@ export async function buildBackupZip(kind: "full" | "notebook", notebookId?: str
   const manifest = {
     format: BACKUP_FORMAT,
     formatVersion: BACKUP_FORMAT_VERSION,
+    schemaVersion: 1,
     app: APP_NAME,
     appVersion: APP_VERSION,
     identifier: APP_ID,
@@ -277,6 +274,7 @@ export interface BackupPreview {
   manifest: {
     format: string;
     formatVersion: number;
+    schemaVersion?: number;
     app: string;
     appVersion: string;
     createdAt: string;
@@ -308,19 +306,33 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
       `Bản sao lưu (định dạng v${manifest.formatVersion}) mới hơn ứng dụng. Hãy nâng cấp Notes rồi nhập lại. Tệp không bị sửa.`,
     );
   }
+  if (!Number.isInteger(manifest.formatVersion) || manifest.formatVersion < 1) {
+    throw new Error("Phiên bản định dạng sao lưu không hợp lệ.");
+  }
+  if (manifest.schemaVersion !== undefined && manifest.schemaVersion !== 1) {
+    throw new Error(`Schema dữ liệu v${manifest.schemaVersion} chưa được hỗ trợ.`);
+  }
   const checksumsFile = zip.file("checksums.json");
   const warnings: string[] = [];
   if (checksumsFile) {
     const checksums = JSON.parse(await checksumsFile.async("string")) as Record<string, string>;
+    const protectedPaths = [
+      "data/library.json",
+      ...names.filter((name) => name.startsWith("assets/") && !name.endsWith("/")),
+    ];
+    for (const path of protectedPaths) {
+      if (typeof checksums[path] !== "string") {
+        throw new Error(`Thiếu checksum cho ${path}.`);
+      }
+    }
     for (const [path, expected] of Object.entries(checksums)) {
       const f = zip.file(path);
       if (!f) {
-        warnings.push(`Thiếu tài nguyên: ${path}`);
-        continue;
+        throw new Error(`Thiếu tài nguyên đã khai báo: ${path}.`);
       }
       const buf = await f.async("uint8array");
       const got = await sha256Hex(buf);
-      if (got !== expected) warnings.push(`Checksum sai: ${path}`);
+      if (got !== expected) throw new Error(`Checksum không khớp: ${path}.`);
     }
   } else {
     warnings.push("Gói không có checksums.json.");
@@ -336,6 +348,33 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
     settings?: LibraryDump["settings"];
     tombstones?: import("./types").Tombstone[];
   };
+  if (
+    !Array.isArray(lib.folders) ||
+    !Array.isArray(lib.notebooks) ||
+    !Array.isArray(lib.pages) ||
+    !Array.isArray(lib.pageObjects) ||
+    !Array.isArray(lib.bookmarks)
+  ) {
+    throw new Error("Cấu trúc data/library.json không hợp lệ.");
+  }
+  const notebookIds = new Set(lib.notebooks.map((notebook) => notebook?.id));
+  const pageIds = new Set(lib.pages.map((page) => page?.id));
+  if (
+    lib.notebooks.some((notebook) => !notebook?.id || typeof notebook.name !== "string") ||
+    lib.pages.some(
+      (page) =>
+        !page?.id ||
+        !notebookIds.has(page.notebookId) ||
+        !Number.isFinite(page.index) ||
+        !Number.isFinite(page.width) ||
+        !Number.isFinite(page.height),
+    ) ||
+    lib.pageObjects.some(
+      (row) => !row?.pageId || !pageIds.has(row.pageId) || !Array.isArray(row.objects),
+    )
+  ) {
+    throw new Error("Dữ liệu sổ hoặc trang trong bản sao lưu không hợp lệ.");
+  }
 
   const assets: AssetRecord[] = [];
   for (const n of names) {
@@ -365,6 +404,17 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
     });
   }
 
+  if (
+    manifest.notebookCount !== lib.notebooks.length ||
+    manifest.pageCount !== lib.pages.length ||
+    (manifest.assetCount !== undefined && manifest.assetCount !== assets.length)
+  ) {
+    throw new Error("Số lượng dữ liệu không khớp với MANIFEST.json.");
+  }
+  if (manifest.schemaVersion === undefined) {
+    warnings.push("Bản sao lưu cũ chưa khai báo schemaVersion; đã kiểm tra bằng cấu trúc tương thích.");
+  }
+
   return {
     manifest,
     notebookNames: lib.notebooks.map((n) => n.name),
@@ -380,6 +430,15 @@ export async function inspectBackup(file: Blob): Promise<BackupPreview> {
       meta: { importedAt: Date.now() },
     },
   };
+}
+
+export async function buildVerifiedBackupZip(kind: "full" | "notebook", notebookId?: string) {
+  const built = await buildBackupZip(kind, notebookId);
+  const preview = await inspectBackup(built.blob);
+  if (preview.warnings.length > 0) {
+    throw new Error(`Bản sao lưu chưa vượt qua kiểm tra: ${preview.warnings.join(" ")}`);
+  }
+  return built;
 }
 
 export function remapBackupDump(dump: LibraryDump) {

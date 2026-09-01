@@ -10,10 +10,12 @@ export default tseslint.config(
   {
     ignores: [
       "dist/**",
+      "dist-desktop/**",
       ".output/**",
       ".vercel/**",
       ".nitro/**",
       "node_modules/**",
+      "src-tauri/target/**",
       "src/routeTree.gen.ts",
     ],
   },

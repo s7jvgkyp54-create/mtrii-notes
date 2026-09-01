@@ -71,12 +71,14 @@ export function SettingsView() {
           <h2 className="mb-3 text-sm font-semibold tracking-wide text-muted uppercase">Giao diện</h2>
           <Row label="Nền tối" hint="Giấy viết vẫn giữ màu sáng để dễ đọc.">
             <Switch
+              aria-label="Bật hoặc tắt nền tối"
               checked={settings.theme === "dark"}
               onCheckedChange={(v) => useNotesStore.getState().persistSettings({ theme: v ? "dark" : "light" })}
             />
           </Row>
           <Row label="Chỉ viết bằng bút" hint="Ngón tay dùng để cuộn trang; chỉ bút mới để lại nét.">
             <Switch
+              aria-label="Chỉ viết bằng bút"
               checked={settings.penOnly}
               onCheckedChange={(v) => useNotesStore.getState().persistSettings({ penOnly: v })}
             />
@@ -94,7 +96,7 @@ export function SettingsView() {
                 </p>
                 {nativeStorage ? (
                   <p className="mt-1 text-muted">
-                    Dữ liệu nằm tại <span className="font-mono text-xs">%LOCALAPPDATA%\{APP_ID}\</span>. PDF và ảnh
+                    Dữ liệu nằm tại <span className="font-mono text-xs">%APPDATA%\NotesData\</span>. PDF và ảnh
                     được sao chép vào kho riêng; xóa tệp nguồn không làm hỏng sổ.
                   </p>
                 ) : (
@@ -183,6 +185,7 @@ export function SettingsView() {
             hint="Chỉ chạy khi ứng dụng đang mở. Nếu bỏ lỡ, lần mở tiếp theo sẽ chạy bù. Ứng dụng đóng thì không tự chạy nền."
           >
             <Switch
+              aria-label="Sao lưu tự động mỗi ngày"
               checked={settings.autoBackup}
               onCheckedChange={(v) => useNotesStore.getState().persistSettings({ autoBackup: v })}
             />
@@ -190,6 +193,7 @@ export function SettingsView() {
           <Row label={`Giữ ${settings.backupKeep} bản gần nhất`}>
             <input
               type="number"
+              aria-label="Số bản sao lưu tự động cần giữ"
               min={1}
               max={30}
               className="h-10 w-20 rounded-md border border-border bg-surface-2 px-2 text-sm"
@@ -285,6 +289,7 @@ export function SettingsView() {
             >
               <div className="w-64 max-w-full">
                 <Input
+                  aria-label="Kho GitHub kiểm tra cập nhật"
                   value={settings.githubRepo || ""}
                   placeholder="username/repo-name"
                   onChange={(e) =>
@@ -300,6 +305,7 @@ export function SettingsView() {
               hint="Tự động kiểm tra GitHub Releases mỗi khi khởi động ứng dụng mà không chặn công việc của bạn."
             >
               <Switch
+                aria-label="Tự kiểm tra cập nhật khi mở"
                 checked={settings.autoCheckUpdates}
                 onCheckedChange={(v) => useNotesStore.getState().persistSettings({ autoCheckUpdates: v })}
               />

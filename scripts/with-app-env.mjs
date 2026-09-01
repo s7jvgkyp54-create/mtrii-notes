@@ -111,12 +111,17 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
+  const windowsShellCommand =
+    process.platform === "win32" && !/\.(?:exe|com)$/i.test(command);
   const child = spawn(command, args, {
     stdio: "inherit",
     env,
     // Windows resolves npm package shims as `.cmd` files. A shell is required
     // there; Linux/macOS keep the direct process path used by the sandbox.
-    shell: process.platform === "win32",
+    // Direct executables (notably Node under "Program Files") must bypass
+    // cmd.exe or the space in their path is split before spawn. Package shims
+    // such as vite.cmd still need the Windows command shell.
+    shell: windowsShellCommand,
   });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
