@@ -6,6 +6,7 @@ import type {
   CanvasObject,
   Folder,
   Notebook,
+  NoteVersion,
   PageRecord
 } from "./types";
 import { normalizeSettings } from "./validation";
@@ -169,6 +170,13 @@ export const putBookmark = (bookmark: Bookmark) => put("bookmarks", bookmark.id,
 export const delBookmark = async (id: string) => { await remove("bookmarks", id); await put("tombstones", id, { id, type: "bookmark", deletedAt: Date.now() }); };
 export const putSettings = (settings: AppSettings) => kvPut("settings", settings);
 export const putMeta = (meta: Record<string, unknown>) => kvPut("meta", meta);
+
+export const putNoteVersion = (version: NoteVersion) => put("note_versions", version.id, version);
+export const getNoteVersions = async (noteId: string) => {
+  await ready();
+  const allVersions = await all<NoteVersion>("note_versions");
+  return allVersions.filter((v) => v.noteId === noteId);
+};
 
 export const putDocument = (noteId: string, doc: any) => put("documents", noteId, doc);
 export const getDocument = async (noteId: string) => {

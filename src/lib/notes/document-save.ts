@@ -1,12 +1,14 @@
 import { create } from "zustand";
-import { putDocument } from "./db";
-import type { StoredDocumentContent } from "./types";
+import { putDocument, putNoteVersion } from "./db";
+import type { StoredDocumentContent, NoteVersion } from "./types";
+import { nid } from "@/lib/utils";
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
 export interface NoteSaveState {
   status: SaveStatus;
   lastSavedAt: number | null;
+  lastVersionAt: number | null;
   error: string | null;
   revision: number;
 }
@@ -23,6 +25,7 @@ export const useDocumentSaveStore = create<DocumentSaveStore>((set) => ({
       const current = state.states[noteId] || {
         status: "idle",
         lastSavedAt: null,
+        lastVersionAt: null,
         error: null,
         revision: 0,
       };
@@ -57,7 +60,7 @@ export function scheduleSaveDocument(noteId: string, doc: StoredDocumentContent)
   };
 }
 
-export async function performSave(noteId: string, doc: StoredDocumentContent, revision: number) {
+export async function performSave(noteId: string, doc: StoredDocumentContent, revision: number, forceSnapshot = false) {
   const store = useDocumentSaveStore.getState();
   store.setSaveState(noteId, { status: "saving", revision });
 
@@ -65,10 +68,31 @@ export async function performSave(noteId: string, doc: StoredDocumentContent, re
     await putDocument(noteId, doc);
     
     const currentState = useDocumentSaveStore.getState().states[noteId];
+    
+    // Version snapshot logic: Every 5 minutes (300000 ms) or if forced
+    const now = Date.now();
+    const lastVersionAt = currentState?.lastVersionAt || 0;
+    let createdVersion = false;
+    
+    if (forceSnapshot || now - lastVersionAt > 300000) {
+      const contentStr = JSON.stringify(doc);
+      const version: NoteVersion = {
+        id: nid(),
+        noteId,
+        content: contentStr,
+        contentHash: contentStr.length.toString(), // Simple size metric as "hash"
+        createdAt: now,
+        reason: forceSnapshot ? "Manual snapshot" : "Autosave snapshot",
+      };
+      await putNoteVersion(version);
+      createdVersion = true;
+    }
+
     if (currentState?.revision === revision) {
       store.setSaveState(noteId, {
         status: "saved",
-        lastSavedAt: Date.now(),
+        lastSavedAt: now,
+        ...(createdVersion ? { lastVersionAt: now } : {}),
         error: null,
         revision,
       });

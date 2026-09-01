@@ -215,6 +215,18 @@ export async function getDocument(noteId: string): Promise<StoredDocumentContent
   if (desktop.isDesktopRuntime()) return desktop.getDocument(noteId);
   return (await getDb()).get("documents", noteId);
 }
+
+export async function putNoteVersion(version: NoteVersion) {
+  if (desktop.isDesktopRuntime()) return desktop.putNoteVersion(version);
+  await (await getDb()).put("note_versions", version);
+}
+
+export async function getNoteVersions(noteId: string): Promise<NoteVersion[]> {
+  if (desktop.isDesktopRuntime()) return desktop.getNoteVersions(noteId);
+  const db = await getDb();
+  const allVersions = await db.getAllFromIndex("note_versions", "by-note", noteId);
+  return allVersions.sort((a, b) => b.createdAt - a.createdAt);
+}
 export async function delDocument(noteId: string) {
   if (desktop.isDesktopRuntime()) return desktop.delDocument(noteId);
   await (await getDb()).delete("documents", noteId);

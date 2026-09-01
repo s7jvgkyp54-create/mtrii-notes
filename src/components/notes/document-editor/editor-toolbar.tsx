@@ -1,6 +1,7 @@
 import React from "react";
 import { type Editor } from "@tiptap/react";
 import { useDocumentSaveStore } from "@/lib/notes/document-save";
+import { VersionHistory } from "./version-history";
 
 interface EditorToolbarProps {
   editor: Editor | null;
@@ -35,13 +36,17 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({ editor, noteId }) 
         </button>
       </div>
 
-      <div className="text-sm text-muted-foreground">
-        {saveState?.status === "saving" && "Đang lưu…"}
-        {saveState?.status === "saved" && saveState.lastSavedAt && `Đã lưu lúc ${new Date(saveState.lastSavedAt).toLocaleTimeString()}`}
-        {saveState?.status === "error" && (
-          <span className="text-destructive">Lỗi lưu — Thử lại</span>
-        )}
-        {!saveState && "Chưa lưu"}
+      <div className="text-sm text-muted-foreground flex items-center gap-4">
+        <span>
+          {saveState?.status === "saving" && "Đang lưu…"}
+          {saveState?.status === "saved" && saveState.lastSavedAt && `Đã lưu lúc ${new Date(saveState.lastSavedAt).toLocaleTimeString()}`}
+          {saveState?.status === "error" && (
+            <span className="text-destructive">Lỗi lưu — Thử lại</span>
+          )}
+          {!saveState && "Chưa lưu"}
+        </span>
+        
+        <VersionHistory noteId={noteId} />
       </div>
     </div>
   );
