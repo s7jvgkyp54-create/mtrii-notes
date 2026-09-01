@@ -9,7 +9,7 @@ export const SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = "notesbackup";
 export const BACKUP_FORMAT_VERSION = 1;
 
-export type PaperPattern = "blank" | "lined" | "grid" | "dots" | "cornell";
+export type PaperPattern = "blank" | "lined" | "grid" | "dots" | "cornell" | "music" | "isometric";
 export type PageSizeName = "a4" | "a5" | "letter";
 export type Orientation = "portrait" | "landscape";
 export type Rotation = 0 | 90 | 180 | 270;
@@ -72,6 +72,7 @@ export interface Folder {
   id: string;
   parentId: string | null;
   name: string;
+  color?: string;
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;

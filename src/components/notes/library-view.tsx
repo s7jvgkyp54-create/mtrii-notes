@@ -35,6 +35,8 @@ import { NotebookCover } from "./cover";
 import { DrivePicker } from "./drive-picker";
 import { Cloud } from "lucide-react";
 import { CreateNotebookDialog } from "./create-dialog";
+import { MoveNotebookDialog } from "./move-notebook-dialog";
+import { ColorPickerDialog } from "./color-picker-dialog";
 
 const NAV: { id: LibrarySection; label: string; icon: typeof LayoutGrid }[] = [
   { id: "all", label: "Tất cả tài liệu", icon: LayoutGrid },
@@ -753,6 +755,7 @@ function FolderRow({ folder }: { folder: Folder }) {
 function FolderMenu({ folder }: { folder: Folder }) {
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
   const [name, setName] = useState(folder.name);
   const s = useNotesStore.getState();
 
@@ -771,6 +774,7 @@ function FolderMenu({ folder }: { folder: Folder }) {
         }
       >
         <MenuItem onSelect={() => setRenameOpen(true)}>Đổi tên</MenuItem>
+        <MenuItem onSelect={() => setColorOpen(true)}>Đổi màu</MenuItem>
         <MenuSep />
         <MenuItem danger onSelect={() => setDeleteOpen(true)}>
           Xóa thư mục
@@ -819,6 +823,16 @@ function FolderMenu({ folder }: { folder: Folder }) {
           </Button>
         </div>
       </Dialog>
+      <ColorPickerDialog
+        open={colorOpen}
+        onOpenChange={setColorOpen}
+        title="Đổi màu thư mục"
+        initialColor={folder.color || "#475569"}
+        onSelect={(color) => {
+          void s.setFolderColor(folder.id, color);
+          toast.success("Đã đổi màu thư mục");
+        }}
+      />
     </>
   );
 }
@@ -938,6 +952,7 @@ function SelectionBar({
   section: LibrarySection;
 }) {
   const disabled = selectedIds.length === 0;
+  const [moveOpen, setMoveOpen] = useState(false);
   return (
     <div className="selection-toolbar fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-surface-2 p-2 text-sm text-fg shadow-xl border border-border">
       <span className="px-2 font-medium tabular-nums">{selectedIds.length} đã chọn</span>
@@ -990,6 +1005,14 @@ function SelectionBar({
             size="sm"
             variant="outline"
             disabled={disabled}
+            onClick={() => setMoveOpen(true)}
+          >
+            <FolderOpen className="size-4" /> Di chuyển
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
             className="text-danger"
             onClick={() => {
               for (const id of selectedIds) void useNotesStore.getState().trashNotebook(id);
@@ -1000,12 +1023,15 @@ function SelectionBar({
           </Button>
         </>
       )}
+      <MoveNotebookDialog open={moveOpen} onOpenChange={setMoveOpen} notebookIds={selectedIds} />
     </div>
   );
 }
 
 function NotebookMenu({ notebook }: { notebook: Notebook }) {
   const [renameOpen, setRenameOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [colorOpen, setColorOpen] = useState(false);
   const [name, setName] = useState(notebook.name);
   const s = useNotesStore.getState();
   const inTrash = Boolean(notebook.deletedAt);
@@ -1033,7 +1059,14 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
         ) : (
           <>
             <MenuItem onSelect={() => setRenameOpen(true)}>Đổi tên</MenuItem>
+            <MenuItem onSelect={() => setColorOpen(true)}>Đổi màu bìa</MenuItem>
             <MenuItem onSelect={() => void s.duplicateNotebook(notebook.id)}>Nhân bản</MenuItem>
+            <MenuItem onSelect={() => setMoveOpen(true)}>Di chuyển đến thư mục</MenuItem>
+            {notebook.folderId && (
+              <MenuItem onSelect={() => void s.moveNotebook(notebook.id, null).then(() => toast.success("Đã đưa ra ngoài thư mục"))}>
+                Đưa ra ngoài thư mục
+              </MenuItem>
+            )}
             <MenuItem onSelect={() => void s.toggleFavorite(notebook.id)}>
               {notebook.favorite ? "Bỏ yêu thích" : "Yêu thích"}
             </MenuItem>
@@ -1064,6 +1097,17 @@ function NotebookMenu({ notebook }: { notebook: Notebook }) {
           </Button>
         </div>
       </Dialog>
+      <MoveNotebookDialog open={moveOpen} onOpenChange={setMoveOpen} notebookIds={[notebook.id]} />
+      <ColorPickerDialog
+        open={colorOpen}
+        onOpenChange={setColorOpen}
+        title="Đổi màu bìa"
+        initialColor={notebook.cover.color}
+        onSelect={(color) => {
+          void s.setCover(notebook.id, color);
+          toast.success("Đã đổi màu bìa");
+        }}
+      />
     </>
   );
 }

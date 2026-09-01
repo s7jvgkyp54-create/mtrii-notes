@@ -122,6 +122,7 @@ interface NotesState {
 
   createFolder: (name: string, parentId: string | null) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
+  setFolderColor: (id: string, color: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
 
   createNotebook: (input: {
@@ -170,6 +171,7 @@ interface NotesState {
   removeBookmark: (id: string) => Promise<void>;
 
   exportPdf: (notebookId: string) => Promise<void>;
+  exportRasterPdf: (notebookId: string, dpi: 150 | 200 | 300, onProgress?: (p: number) => void) => Promise<void>;
   exportBackup: (kind: "full" | "notebook", notebookId?: string) => Promise<void>;
   importBackupFile: (
     file: File,
@@ -449,6 +451,15 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   renameFolder: async (id, name) => {
     const folders = get().folders.map((f) =>
       f.id === id ? { ...f, name, updatedAt: Date.now() } : f,
+    );
+    set({ folders });
+    const f = folders.find((x) => x.id === id);
+    if (f) await enqueue("folder", () => db.putFolder(f));
+  },
+
+  setFolderColor: async (id, color) => {
+    const folders = get().folders.map((f) =>
+      f.id === id ? { ...f, color, updatedAt: Date.now() } : f,
     );
     set({ folders });
     const f = folders.find((x) => x.id === id);
@@ -938,6 +949,23 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
     await downloadBlob(blob, `${nb.name}.pdf`);
+  },
+
+  exportRasterPdf: async (notebookId, dpi, onProgress) => {
+    const nb = get().notebooks.find((n) => n.id === notebookId);
+    if (!nb) throw new Error("Không tìm thấy sổ.");
+    const payload = await db.loadNotebookPayload(notebookId);
+    const { exportRasterPdf } = await import("./raster-pdf-export");
+    const bytes = await exportRasterPdf({
+      notebook: nb,
+      pages: payload.pages,
+      objects: payload.objects,
+    }, dpi, onProgress);
+    if (bytes.length < 100) throw new Error("Tệp PDF xuất ra quá nhỏ, có thể bị lỗi.");
+    
+    const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
+    const { downloadBlob } = await import("@/lib/utils");
+    await downloadBlob(blob, `${nb.name} (Ảnh).pdf`);
   },
 
   exportBackup: async (kind, notebookId) => {

@@ -11,7 +11,17 @@ const PATTERNS: { id: PaperPattern; label: string }[] = [
   { id: "grid", label: "Ô vuông" },
   { id: "dots", label: "Chấm" },
   { id: "cornell", label: "Cornell" },
+  { id: "music", label: "Khuông nhạc" },
+  { id: "isometric", label: "Isometric" },
 ];
+
+const NOTEBOOK_TEMPLATES = [
+  { label: "Sổ Ghi chép", pattern: "lined", color: PAPER_COLORS[0]!.color, name: "Ghi chép chung" },
+  { label: "Sổ Kế toán", pattern: "grid", color: PAPER_COLORS[1]!.color, name: "Kế toán" },
+  { label: "Bản vẽ Kỹ thuật", pattern: "isometric", color: PAPER_COLORS[0]!.color, name: "Bản vẽ" },
+  { label: "Sáng tác Nhạc", pattern: "music", color: PAPER_COLORS[0]!.color, name: "Bản nhạc" },
+  { label: "Sổ tay Cornell", pattern: "cornell", color: PAPER_COLORS[1]!.color, name: "Ghi chú nhanh" },
+] as const;
 
 export function CreateNotebookDialog({
   open,
@@ -42,6 +52,25 @@ export function CreateNotebookDialog({
           Tên sổ
           <Input className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} />
         </label>
+        <div>
+          <p className="mb-2 text-sm font-medium">Mẫu sổ nhanh</p>
+          <div className="flex flex-wrap gap-2">
+            {NOTEBOOK_TEMPLATES.map((t) => (
+              <button
+                key={t.label}
+                type="button"
+                onClick={() => {
+                  setName(t.name);
+                  setPattern(t.pattern);
+                  setPaperColor(t.color);
+                }}
+                className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium hover:bg-surface transition-colors"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div>
           <p className="mb-2 text-sm font-medium">Bìa</p>
           <div className="flex flex-wrap gap-2">

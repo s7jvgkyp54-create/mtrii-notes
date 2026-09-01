@@ -56,6 +56,8 @@ import { OPEN_IMAGE_PICKER_EVENT, PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
 import { NotesMark } from "./logo";
 import { DocumentEditor } from "./document-editor/document-editor";
+import { ColorPickerDialog } from "./color-picker-dialog";
+import { RasterPdfExportDialog } from "./raster-pdf-export-dialog";
 
 const PENS: { id: ToolName; label: string; icon: typeof PenLine }[] = [
   { id: "ballpoint", label: "Bút bi", icon: PenLine },
@@ -77,6 +79,9 @@ export function EditorView({ notebookId }: { notebookId: string }) {
   const pageMode = useNotesStore((s) => s.settings.pageMode);
   const [sideOpen, setSideOpen] = useState(true);
   const [sideTab, setSideTab] = useState<"pages" | "toc" | "marks">("pages");
+  const [colorOpen, setColorOpen] = useState(false);
+  const [rasterExportOpen, setRasterExportOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [search, setSearch] = useState("");
   const [dragPageIndex, setDragPageIndex] = useState<number | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -263,13 +268,17 @@ export function EditorView({ notebookId }: { notebookId: string }) {
                   .catch((e) => toast.error(String(e)))
               }
             >
-              <FileDown className="size-4" /> Xuất PDF (gộp ghi chú)
+              <FileDown className="size-4" /> Xuất PDF (vector)
+            </MenuItem>
+            <MenuItem onSelect={() => setRasterExportOpen(true)}>
+              <FileDown className="size-4" /> Xuất PDF (ảnh phẳng)
             </MenuItem>
             <MenuItem
               onSelect={() => void useNotesStore.getState().exportBackup("notebook", notebookId)}
             >
               Xuất bản sao sổ (.notesbackup)
             </MenuItem>
+            <MenuItem onSelect={() => setColorOpen(true)}>Đổi màu bìa</MenuItem>
             <MenuSep />
             <MenuItem
               onSelect={() =>
@@ -284,6 +293,35 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             </MenuItem>
           </DropdownMenu>
         </header>
+
+        <ColorPickerDialog
+          open={colorOpen}
+          onOpenChange={setColorOpen}
+          title="Đổi màu bìa"
+          initialColor={notebook.cover.color}
+          onSelect={(color) => {
+            void useNotesStore.getState().setCover(notebook.id, color);
+            toast.success("Đã đổi màu bìa");
+          }}
+        />
+
+        <RasterPdfExportDialog
+          open={rasterExportOpen}
+          onOpenChange={setRasterExportOpen}
+          isExporting={isExporting}
+          onConfirm={async (options) => {
+            setIsExporting(true);
+            try {
+              await useNotesStore.getState().exportRasterPdf(notebookId, options.dpi);
+              toast.success("Đã xuất PDF dạng ảnh phẳng");
+              setRasterExportOpen(false);
+            } catch (e) {
+              toast.error(String(e));
+            } finally {
+              setIsExporting(false);
+            }
+          }}
+        />
 
         {notebook.editorType !== "document" && <Toolbar />}
 

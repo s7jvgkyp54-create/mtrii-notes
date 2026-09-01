@@ -64,6 +64,31 @@ export function drawPaper(ctx: CanvasRenderingContext2D, w: number, h: number, p
       ctx.lineTo(w - 24, y);
       ctx.stroke();
     }
+  } else if (paper.pattern === "music") {
+    const staveGap = 10;
+    const blockGap = 50;
+    for (let y = 60; y < h - 40; y += blockGap + staveGap * 4) {
+      for (let i = 0; i < 5; i++) {
+        const sy = y + i * staveGap;
+        ctx.beginPath();
+        ctx.moveTo(inset, sy);
+        ctx.lineTo(w - 24, sy);
+        ctx.stroke();
+      }
+    }
+  } else if (paper.pattern === "isometric") {
+    const size = 16;
+    const wSteps = Math.ceil(w / size);
+    const hSteps = Math.ceil(h / (size * Math.sqrt(3) / 2));
+    for (let i = 0; i < wSteps; i++) {
+      for (let j = 0; j < hSteps; j++) {
+        const x = i * size + (j % 2 === 0 ? 0 : size / 2);
+        const y = j * (size * Math.sqrt(3) / 2);
+        ctx.beginPath();
+        ctx.arc(x, y, 0.85, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
   ctx.restore();
 }
