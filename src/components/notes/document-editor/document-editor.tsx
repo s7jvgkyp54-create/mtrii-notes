@@ -9,7 +9,16 @@ import { SlashCommands, slashSuggestion } from "./slash-extension";
 import { getDocument } from "@/lib/notes/db";
 import { normalizeDocumentContent } from "@/lib/notes/document-content";
 import { scheduleSaveDocument, flushSaveDocument } from "@/lib/notes/document-save";
+
+import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
+import { all, createLowlight } from "lowlight";
+import { MathExtension } from "@aarkue/tiptap-math-extension";
+
+import "highlight.js/styles/github-dark.css";
+import "katex/dist/katex.min.css";
 import "./editor.css";
+
+const lowlight = createLowlight(all);
 
 interface DocumentEditorProps {
   noteId: string;
@@ -21,12 +30,20 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({
+        codeBlock: false, // Disable default codeBlock to use lowlight
+      }),
       Placeholder.configure({
         placeholder: "Gõ '/' để mở menu lệnh, hoặc bắt đầu viết...",
       }),
       SlashCommands.configure({
         suggestion: slashSuggestion,
+      }),
+      CodeBlockLowlight.configure({
+        lowlight,
+      }),
+      MathExtension.configure({
+        evaluation: false, // Set to true if you want it to evaluate math expressions too
       }),
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },

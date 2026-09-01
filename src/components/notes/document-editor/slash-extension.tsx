@@ -56,6 +56,22 @@ const getSuggestionItems = ({ query }: { query: string }): CommandItem[] => {
         editor.chain().focus().deleteRange(range).setNode("blockquote").run();
       },
     },
+    {
+      title: "Code Block",
+      description: "Đoạn mã lập trình",
+      icon: <Code className="w-4 h-4" />,
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).setNode("codeBlock").run();
+      },
+    },
+    {
+      title: "Toán học",
+      description: "Công thức KaTeX (hoặc gõ $$)",
+      icon: <span className="font-serif w-4 h-4 text-center font-bold">∑</span>,
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).insertContent("$$").run();
+      },
+    },
   ];
 
   return items.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()));

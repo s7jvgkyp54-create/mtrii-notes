@@ -27,6 +27,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@aarkue/tiptap-math-extension": "^1.4.0",
     "@electric-sql/pglite": "^0.5.4",
     "@fontsource/be-vietnam-pro": "^5.3.0",
     "@hookform/resolvers": "^5.7.0",
@@ -65,6 +66,7 @@
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@tiptap/extension-bubble-menu": "^3.30.6",
+    "@tiptap/extension-code-block-lowlight": "^3.30.6",
     "@tiptap/extension-placeholder": "^3.30.6",
     "@tiptap/pm": "^3.30.6",
     "@tiptap/react": "^3.30.6",
@@ -75,11 +77,14 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.0.0",
+    "highlight.js": "^11.12.0",
     "idb": "^8.0.3",
     "jose": "6.2.9",
     "jszip": "^3.10.1",
+    "katex": "^0.18.5",
     "kysely": "^0.28.5",
     "lodash.debounce": "^4.0.8",
+    "lowlight": "^3.3.0",
     "lucide-react": "^0.510.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
@@ -102,6 +107,7 @@
   "devDependencies": {
     "@eslint/js": "^9.20.0",
     "@tauri-apps/cli": "^2.11.4",
+    "@types/katex": "^0.16.8",
     "@types/lodash.debounce": "^4.0.9",
     "@types/node": "^22.16.5",
     "@types/pg": "^8.11.10",
