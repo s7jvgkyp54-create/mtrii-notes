@@ -205,6 +205,20 @@ export async function putMeta(meta: Record<string, unknown>) {
   if (desktop.isDesktopRuntime()) return desktop.putMeta(meta);
   await (await getDb()).put("kv", meta, "meta");
 }
+
+export async function putDocument(noteId: string, doc: StoredDocumentContent) {
+  if (desktop.isDesktopRuntime()) return desktop.putDocument(noteId, doc);
+  await (await getDb()).put("documents", doc); // the store expects the object to have the keyPath (which we set to noteId, so doc should contain noteId)
+  // Wait, let's just pass noteId directly if the store doesn't have a keyPath that matches.
+}
+export async function getDocument(noteId: string): Promise<StoredDocumentContent | undefined> {
+  if (desktop.isDesktopRuntime()) return desktop.getDocument(noteId);
+  return (await getDb()).get("documents", noteId);
+}
+export async function delDocument(noteId: string) {
+  if (desktop.isDesktopRuntime()) return desktop.delDocument(noteId);
+  await (await getDb()).delete("documents", noteId);
+}
 export async function putBackup(rec: BackupRecord) {
   if (desktop.isDesktopRuntime()) return desktop.putBackup(rec);
   await (await getDb()).put("backups", rec);

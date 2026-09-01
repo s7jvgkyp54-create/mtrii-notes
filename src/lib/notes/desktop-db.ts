@@ -170,6 +170,14 @@ export const delBookmark = async (id: string) => { await remove("bookmarks", id)
 export const putSettings = (settings: AppSettings) => kvPut("settings", settings);
 export const putMeta = (meta: Record<string, unknown>) => kvPut("meta", meta);
 
+export const putDocument = (noteId: string, doc: any) => put("documents", noteId, doc);
+export const getDocument = async (noteId: string) => {
+  await ready();
+  const allDocs = await all<{ noteId: string } & any>("documents");
+  return allDocs.find((d) => d.noteId === noteId || (d as any).id === noteId);
+};
+export const delDocument = async (id: string) => { await remove("documents", id); await put("tombstones", id, { id, type: "document", deletedAt: Date.now() }); };
+
 export async function putAsset(asset: AssetRecord) {
   await ready();
   const { blob, ...meta } = asset;

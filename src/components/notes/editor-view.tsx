@@ -48,6 +48,7 @@ import { useNotesNavigate } from "@/lib/notes/navigation";
 import { OPEN_IMAGE_PICKER_EVENT, PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
 import { NotesMark } from "./logo";
+import { DocumentEditor } from "./document-editor/document-editor";
 
 const PENS: { id: ToolName; label: string; icon: typeof PenLine }[] = [
   { id: "ballpoint", label: "Bút bi", icon: PenLine },
@@ -277,194 +278,202 @@ export function EditorView({ notebookId }: { notebookId: string }) {
           </DropdownMenu>
         </header>
 
-        <Toolbar />
+        {notebook.editorType !== "document" && <Toolbar />}
 
-        <div className="flex min-h-0 flex-1">
-          <aside
-            className={cn(
-              "flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-[var(--motion-fast)]",
-              sideOpen ? "w-52" : "w-0 overflow-hidden",
-            )}
-          >
-            <div className="flex gap-1 p-2">
-              {(
-                [
-                  ["pages", "Trang"],
-                  ["toc", "Mục lục"],
-                  ["marks", "Dấu trang"],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setSideTab(id)}
-                  className={cn(
-                    "flex-1 rounded-md py-1 text-[11px]",
-                    sideTab === id ? "bg-accent-soft text-accent" : "hover:bg-overlay",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
-              {sideTab === "pages" &&
-                pages.map((p, i) => (
-                  <article
-                    key={p.id}
-                    draggable
-                    onDragStart={() => setDragPageIndex(i)}
-                    onDragEnd={() => setDragPageIndex(null)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      if (dragPageIndex !== null && dragPageIndex !== i) {
-                        void useNotesStore.getState().reorderPages(dragPageIndex, i);
-                      }
-                      setDragPageIndex(null);
-                    }}
+        {notebook.editorType === "document" ? (
+          <div className="flex-1 min-h-0 relative">
+            <DocumentEditor noteId={notebookId} />
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-1">
+            <aside
+              className={cn(
+                "flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-[var(--motion-fast)]",
+                sideOpen ? "w-52" : "w-0 overflow-hidden",
+              )}
+            >
+              <div className="flex gap-1 p-2">
+                {(
+                  [
+                    ["pages", "Trang"],
+                    ["toc", "Mục lục"],
+                    ["marks", "Dấu trang"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSideTab(id)}
                     className={cn(
-                      "group relative mb-2 rounded-lg border bg-surface-2 p-1.5",
-                      i === pageIndex ? "border-accent" : "border-border",
-                      dragPageIndex === i && "opacity-60",
+                      "flex-1 rounded-md py-1 text-[11px]",
+                      sideTab === id ? "bg-accent-soft text-accent" : "hover:bg-overlay",
                     )}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        useNotesStore.getState().setPageIndex(i);
-                        document
-                          .getElementById(`page-${p.id}`)
-                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}
-                      className="block w-full text-left"
-                      aria-current={i === pageIndex ? "page" : undefined}
-                    >
-                      <PageThumbnail page={p} />
-                      <p className="mt-1 text-center text-xs text-muted">{i + 1}</p>
-                    </button>
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
-                      <PageMenu page={p} pageIndex={i} pageCount={pages.length} />
-                    </div>
-                  </article>
+                    {label}
+                  </button>
                 ))}
-              {sideTab === "toc" && <TocList />}
-              {sideTab === "marks" && <BookmarkList />}
-            </div>
-            <div className="flex gap-1 border-t border-border p-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void useNotesStore.getState().addPage(pageIndex)}
-              >
-                <Plus className="size-3.5" /> Trang
-              </Button>
-            </div>
-          </aside>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+                {sideTab === "pages" &&
+                  pages.map((p, i) => (
+                    <article
+                      key={p.id}
+                      draggable
+                      onDragStart={() => setDragPageIndex(i)}
+                      onDragEnd={() => setDragPageIndex(null)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (dragPageIndex !== null && dragPageIndex !== i) {
+                          void useNotesStore.getState().reorderPages(dragPageIndex, i);
+                        }
+                        setDragPageIndex(null);
+                      }}
+                      className={cn(
+                        "group relative mb-2 rounded-lg border bg-surface-2 p-1.5",
+                        i === pageIndex ? "border-accent" : "border-border",
+                        dragPageIndex === i && "opacity-60",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          useNotesStore.getState().setPageIndex(i);
+                          document
+                            .getElementById(`page-${p.id}`)
+                            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        className="block w-full text-left"
+                        aria-current={i === pageIndex ? "page" : undefined}
+                      >
+                        <PageThumbnail page={p} />
+                        <p className="mt-1 text-center text-xs text-muted">{i + 1}</p>
+                      </button>
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+                        <PageMenu page={p} pageIndex={i} pageCount={pages.length} />
+                      </div>
+                    </article>
+                  ))}
+                {sideTab === "toc" && <TocList />}
+                {sideTab === "marks" && <BookmarkList />}
+              </div>
+              <div className="flex gap-1 border-t border-border p-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void useNotesStore.getState().addPage(pageIndex)}
+                >
+                  <Plus className="size-3.5" /> Trang
+                </Button>
+              </div>
+            </aside>
 
-          <div ref={stageRef} className="relative min-w-0 flex-1 overflow-auto">
+            <div ref={stageRef} className="relative min-w-0 flex-1 overflow-auto">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="absolute top-2 left-2 z-10 bg-surface/80"
+                onClick={() => setSideOpen((v) => !v)}
+                aria-label="Thu gọn trang"
+              >
+                <PanelLeft />
+              </Button>
+              {!ready ? (
+                <div className="grid h-full place-items-center">
+                  <NotesMark />
+                </div>
+              ) : (
+                <div className="mx-auto flex flex-col items-center gap-6 py-8">
+                  {visiblePages.map((p) => (
+                    <div key={p.id} id={`page-${p.id}`} className="flex flex-col items-center gap-2">
+                      <PageSurface page={p} zoom={zoom} active={pages[pageIndex]?.id === p.id} />
+                      <p className="text-xs tabular-nums text-muted">
+                        {p.index + 1} / {pages.length}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {notebook.editorType !== "document" && (
+          <footer className="flex flex-wrap items-center gap-2 border-t border-border bg-surface px-3 py-1.5 pb-16 text-xs md:pb-1.5">
             <Button
               variant="ghost"
-              size="icon"
-              className="absolute top-2 left-2 z-10 bg-surface/80"
-              onClick={() => setSideOpen((v) => !v)}
-              aria-label="Thu gọn trang"
+              size="sm"
+              aria-label="Thu nhỏ trang"
+              onClick={() => useNotesStore.getState().setZoom(zoom / 1.1)}
             >
-              <PanelLeft />
+              <Minus className="size-3.5" />
             </Button>
-            {!ready ? (
-              <div className="grid h-full place-items-center">
-                <NotesMark />
-              </div>
-            ) : (
-              <div className="mx-auto flex flex-col items-center gap-6 py-8">
-                {visiblePages.map((p) => (
-                  <div key={p.id} id={`page-${p.id}`} className="flex flex-col items-center gap-2">
-                    <PageSurface page={p} zoom={zoom} active={pages[pageIndex]?.id === p.id} />
-                    <p className="text-xs tabular-nums text-muted">
-                      {p.index + 1} / {pages.length}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <footer className="flex flex-wrap items-center gap-2 border-t border-border bg-surface px-3 py-1.5 pb-16 text-xs md:pb-1.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Thu nhỏ trang"
-            onClick={() => useNotesStore.getState().setZoom(zoom / 1.1)}
-          >
-            <Minus className="size-3.5" />
-          </Button>
-          <span className="w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Phóng to trang"
-            onClick={() => useNotesStore.getState().setZoom(zoom * 1.1)}
-          >
-            <Plus className="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              const p = pages[pageIndex];
-              if (!p || !stageRef.current) return;
-              const { w } = displaySize(p);
-              const z = (stageRef.current.clientWidth - 48) / w;
-              useNotesStore.getState().setZoom(z);
-            }}
-          >
-            Vừa rộng
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              const p = pages[pageIndex];
-              if (!p || !stageRef.current) return;
-              const { w, h } = displaySize(p);
-              const z = Math.min(
-                (stageRef.current.clientWidth - 48) / w,
-                (stageRef.current.clientHeight - 48) / h,
-              );
-              useNotesStore.getState().setZoom(z);
-            }}
-          >
-            Vừa trang
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() =>
-              useNotesStore.getState().persistSettings({
-                pageMode: pageMode === "continuous" ? "single" : "continuous",
-              })
-            }
-          >
-            {pageMode === "continuous" ? "Cuộn liên tục" : "Từng trang"}
-          </Button>
-          <form
-            className="ml-auto flex items-center gap-1"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void runSearch(notebookId, search);
-            }}
-          >
-            <Search className="size-3.5 text-subtle" />
-            <Input
-              className="h-10 w-40"
-              placeholder="Tìm trong PDF…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </form>
-        </footer>
+            <span className="w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Phóng to trang"
+              onClick={() => useNotesStore.getState().setZoom(zoom * 1.1)}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const p = pages[pageIndex];
+                if (!p || !stageRef.current) return;
+                const { w } = displaySize(p);
+                const z = (stageRef.current.clientWidth - 48) / w;
+                useNotesStore.getState().setZoom(z);
+              }}
+            >
+              Vừa rộng
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const p = pages[pageIndex];
+                if (!p || !stageRef.current) return;
+                const { w, h } = displaySize(p);
+                const z = Math.min(
+                  (stageRef.current.clientWidth - 48) / w,
+                  (stageRef.current.clientHeight - 48) / h,
+                );
+                useNotesStore.getState().setZoom(z);
+              }}
+            >
+              Vừa trang
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                useNotesStore.getState().persistSettings({
+                  pageMode: pageMode === "continuous" ? "single" : "continuous",
+                })
+              }
+            >
+              {pageMode === "continuous" ? "Cuộn liên tục" : "Từng trang"}
+            </Button>
+            <form
+              className="ml-auto flex items-center gap-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runSearch(notebookId, search);
+              }}
+            >
+              <Search className="size-3.5 text-subtle" />
+              <Input
+                className="h-10 w-40"
+                placeholder="Tìm trong PDF…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </form>
+          </footer>
+        )}
       </div>
     </TooltipProvider>
   );

@@ -15,6 +15,7 @@ export type LibrarySection = "all" | "recent" | "favorites" | "trash";
 export type NotebookEditorType = "canvas" | "document";
 
 export interface StoredDocumentContent {
+  noteId: string;
   schemaVersion: 1;
   type: "tiptap";
   doc: {
