@@ -25,6 +25,7 @@ export function TextEditorOverlay({
   const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastCommitRef = useRef(false);
+  const mountedTimeRef = useRef(Date.now());
 
   const callbacksRef = useRef({ onCommit, onCancel });
   useEffect(() => {
@@ -145,6 +146,11 @@ export function TextEditorOverlay({
           }
         }}
         onBlur={(e) => {
+          if (Date.now() - mountedTimeRef.current < 200) {
+            // Browser fired mousedown/blur sequence immediately after creation. Force focus back.
+            e.currentTarget.focus();
+            return;
+          }
           handleCommit(e.currentTarget);
         }}
       />

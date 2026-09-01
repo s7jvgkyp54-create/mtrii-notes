@@ -582,6 +582,7 @@ export function PageSurface({
     strokeBeforeState.current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
 
     if (tool.name === "text") {
+      ev.preventDefault();
       const hit = [...objects].reverse().find((o) => o.type === "text" && hitTest(o, p, 2));
       if (hit && hit.type === "text") {
         setEditing(hit);
