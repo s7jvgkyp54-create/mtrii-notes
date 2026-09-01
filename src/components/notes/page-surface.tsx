@@ -418,7 +418,11 @@ export function PageSurface({
   useEffect(() => {
     if (!isVisible) return;
     const ac = new AbortController();
+    // Canvases are released while a page is outside the viewport. When that
+    // page becomes visible again, the PDF identity can still be unchanged even
+    // though its base canvas is empty, so `baseReady` must also trigger a draw.
     const pdfChanged =
+      !baseReady.current ||
       lastPdfAsset.current !== notebook?.pdfAssetId ||
       lastPage.current !== page.pdfPage ||
       Math.abs(lastZoom.current - zoom) > 0.01;
