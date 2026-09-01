@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8080",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Notes",
+      "hasCanvas": false,
+      "bodyTextLen": 60,
+      "bodyTextHash": "3fb6ddc126be7d9e9d7d2f63c2d25563da1f7d983f9a1ba31747e10d61fb7281",
+      "bodyTextPrefix": "Notes Đang khởi động… Cửa sổ desktop đã tạo Đã chạy 0.0 giây",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "C:\\Users\\mnhti\\Downloads\\dbIRKRLHrB9vtNXw-grok-workspace\\screenshots\\notes-upgrade-dev.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Notes",
+      "hasCanvas": false,
+      "bodyTextLen": 160,
+      "bodyTextHash": "99ad8bd7dcfe57f79a6c6783d03cee2454c3ad2629cfdc0bdaca2501e0e74e59",
+      "bodyTextPrefix": "Tất cả tài liệu Ngày sửa Tên Tạo mới THƯ MỤC (1) 1 sổ Học tập 1 ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "C:\\Users\\mnhti\\Downloads\\dbIRKRLHrB9vtNXw-grok-workspace\\screenshots\\notes-upgrade-dev-mobile.png"
+    }
+  },
+  "brandWarnings": [
+    "BRAND NOTE: no custom public/og.jpg — the platform will serve the og.grok.me placeholder. Custom cards are the default for games of every kind (DOM board/word games included), whimsical apps, creative tools, and brand-forward pages — only plain utilities (converters, CRUD trackers, admin dashboards) keep the placeholder. If this app is not a plain utility, finish the brand-asset pass per \\workspace\\.grok\\skills\\og\\SKILL.md."
+  ],
+  "authWarnings": [],
+  "verdictFile": "C:\\Users\\mnhti\\Downloads\\dbIRKRLHrB9vtNXw-grok-workspace\\screenshots\\notes-upgrade-dev.json"
+}

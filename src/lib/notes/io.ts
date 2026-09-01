@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, BlendMode, LineCapStyle } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import JSZip from "jszip";
 import {
@@ -64,9 +64,19 @@ async function drawObjectsOnPdfPage(
         pdfPage.drawSvgPath(path, {
           x: 0,
           y: pageH,
-          color: hexRgb(o.color),
-          borderWidth: 0,
-          opacity: o.tool === "highlighter" ? 0.5 : 1,
+          borderColor: hexRgb(o.color),
+          borderWidth: o.width,
+          borderOpacity:
+            o.tool === "highlighter"
+              ? 0.38
+              : o.tool === "pencil"
+                ? 0.78
+                : 1,
+          borderLineCap: LineCapStyle.Round,
+          blendMode:
+            o.tool === "highlighter"
+              ? BlendMode.Multiply
+              : BlendMode.Normal,
         });
       }
     } else if (o.type === "text") {
