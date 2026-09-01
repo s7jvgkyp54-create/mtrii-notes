@@ -153,7 +153,7 @@ export const delNotebook = async (id: string) => { await remove("notebooks", id)
 export const putPage = (page: PageRecord) => put("pages", page.id, page);
 export const putPagesBatch = (pages: PageRecord[]) =>
   putMany(pages.map((page) => ({ entity: "pages" as const, id: page.id, value: page })));
-export const delPage = async (id: string) => { await remove("pages", id); await put("tombstones", id, { id, type: "page", deletedAt: Date.now() }); };
+export const delPage = async (id: string) => { await remove("pages", id); await remove("pageObjects", id); await put("tombstones", id, { id, type: "page", deletedAt: Date.now() }); };
 export const putObjects = (pageId: string, objects: CanvasObject[]) =>
   put("pageObjects", pageId, { pageId, objects, updatedAt: Date.now() });
 export const putObjectsBatch = (entries: { pageId: string; objects: CanvasObject[] }[]) => {

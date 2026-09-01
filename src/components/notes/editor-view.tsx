@@ -25,6 +25,12 @@ import {
   MoreHorizontal,
   Upload,
   X,
+  Bold,
+  Italic,
+  Underline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -627,9 +633,18 @@ function ToolBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon:
 }
 
 function TextBtn() {
-  const active = useNotesStore((s) => s.tool.name === "text");
-  const fontSize = useNotesStore((s) => s.tool.fontSize);
+  const tool = useNotesStore((s) => s.tool);
+  const active = tool.name === "text";
+  const fontSize = tool.fontSize;
   const sizes = [14, 18, 22, 28, 36, 48];
+  
+  const setTool = (patch: Partial<import("@/lib/notes/store").ToolState>) => {
+    const state = useNotesStore.getState();
+    state.setTool({ name: "text", ...patch });
+    
+    // Phát sự kiện để page-surface cập nhật TextObject đang chọn hoặc đang sửa
+    window.dispatchEvent(new CustomEvent("notes-text-style-change", { detail: patch }));
+  };
 
   return (
     <Popover
@@ -641,7 +656,7 @@ function TextBtn() {
           className={cn("w-auto min-w-14 gap-1.5 px-2", active && "tool-active")}
           aria-label={`Chữ, cỡ ${fontSize}`}
           aria-pressed={active}
-          onClick={() => useNotesStore.getState().setTool({ name: "text" })}
+          onClick={() => setTool({})}
         >
           <Type />
           <span className="text-xs tabular-nums">{Math.round(fontSize)}</span>
@@ -649,44 +664,145 @@ function TextBtn() {
       }
     >
       <div className="w-64">
+        {/* Font Selection */}
+        <div className="mb-4">
+          <p className="mb-1 text-xs font-semibold">Font chữ</p>
+          <select
+            className="w-full rounded-md border border-border bg-surface p-1.5 text-sm"
+            value={tool.fontFamily || "Be Vietnam Pro"}
+            onChange={(e) => setTool({ fontFamily: e.target.value })}
+          >
+            <option value="Be Vietnam Pro">Be Vietnam Pro</option>
+            <option value="Arial">Arial</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Courier New">Courier New</option>
+          </select>
+        </div>
+
+        {/* Font Style Toggles */}
+        <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.fontWeight === "bold" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ fontWeight: tool.fontWeight === "bold" ? "normal" : "bold" })}
+          >
+            <Bold className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.fontStyle === "italic" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ fontStyle: tool.fontStyle === "italic" ? "normal" : "italic" })}
+          >
+            <Italic className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.textDecoration === "underline" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ textDecoration: tool.textDecoration === "underline" ? "none" : "underline" })}
+          >
+            <Underline className="size-4" />
+          </Button>
+        </div>
+
+        {/* Alignment Toggles */}
+        <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "left" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ textAlign: "left" })}
+          >
+            <AlignLeft className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "center" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ textAlign: "center" })}
+          >
+            <AlignCenter className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "right" && "bg-surface shadow-sm")}
+            onClick={() => setTool({ textAlign: "right" })}
+          >
+            <AlignRight className="size-4" />
+          </Button>
+        </div>
+
+        {/* Font Size */}
         <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold">Cỡ chữ</p>
-            <p className="text-xs text-muted">Áp dụng cho chữ thêm tiếp theo</p>
-          </div>
+          <p className="text-sm font-semibold">Cỡ chữ</p>
           <span className="rounded-md bg-accent-soft px-2 py-1 text-sm font-semibold text-accent tabular-nums">
             {Math.round(fontSize)} pt
           </span>
-        </div>
-        <div className="mb-4 grid grid-cols-3 gap-1.5">
-          {sizes.map((size) => (
-            <button
-              key={size}
-              type="button"
-              className={cn(
-                "h-10 rounded-md text-sm font-medium transition-colors",
-                Math.round(fontSize) === size
-                  ? "bg-accent text-accent-fg"
-                  : "bg-overlay text-fg hover:bg-border",
-              )}
-              onClick={() => useNotesStore.getState().setTool({ name: "text", fontSize: size })}
-            >
-              {size}
-            </button>
-          ))}
         </div>
         <Slider
           min={10}
           max={72}
           step={1}
           value={fontSize}
-          onValueChange={(value) =>
-            useNotesStore.getState().setTool({ name: "text", fontSize: value })
-          }
+          className="mb-4"
+          onValueChange={(value) => setTool({ fontSize: value })}
         />
-        <p className="mt-3 truncate text-muted" style={{ fontSize: Math.min(fontSize, 30) }}>
-          Chữ mẫu rõ ràng
-        </p>
+
+        {/* Text Color */}
+        <p className="mb-2 text-xs font-semibold">Màu chữ</p>
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {PEN_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={cn("size-6 rounded-full border-2", tool.color === c ? "border-fg" : "border-transparent")}
+              style={{ background: c }}
+              onClick={() => setTool({ color: c })}
+            />
+          ))}
+        </div>
+
+        {/* Text Background Color */}
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold">Màu nền</p>
+          {tool.textBgColor && (
+            <button
+              type="button"
+              className="text-[10px] text-muted hover:text-fg"
+              onClick={() => setTool({ textBgColor: null })}
+            >
+              Xóa nền
+            </button>
+          )}
+        </div>
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {HIGHLIGHTER_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={cn("size-6 rounded-full border-2", tool.textBgColor === c ? "border-fg" : "border-transparent")}
+              style={{ background: c }}
+              onClick={() => setTool({ textBgColor: c })}
+            />
+          ))}
+        </div>
+        
+        {tool.textBgColor && (
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-semibold">Độ trong suốt nền</p>
+            <Slider
+              min={0.1}
+              max={1}
+              step={0.1}
+              value={tool.textBgOpacity ?? 1}
+              onValueChange={(value) => setTool({ textBgOpacity: value })}
+            />
+          </div>
+        )}
+
       </div>
     </Popover>
   );

@@ -133,6 +133,14 @@ export interface TextObject {
   fontSize: number;
   color: string;
   align: "left" | "center" | "right";
+  fontFamily?: string;
+  fontWeight?: "normal" | "bold";
+  fontStyle?: "normal" | "italic";
+  textDecoration?: "none" | "underline";
+  backgroundColor?: string | null;
+  backgroundOpacity?: number;
+  lineHeight?: number;
+  rotation?: number;
 }
 
 export interface ImageObject {

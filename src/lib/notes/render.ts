@@ -203,15 +203,58 @@ export function drawText(
   t: Extract<CanvasObject, { type: "text" }>,
 ) {
   ctx.save();
-  ctx.fillStyle = t.color;
-  ctx.font = `${t.fontSize}px "Be Vietnam Pro", "Segoe UI", sans-serif`;
+  
+  const fontWeight = t.fontWeight || "normal";
+  const fontStyle = t.fontStyle || "normal";
+  const fontFamily = t.fontFamily || "Be Vietnam Pro";
+  
+  ctx.font = `${fontStyle} ${fontWeight} ${t.fontSize}px "${fontFamily}", "Segoe UI", sans-serif`;
   ctx.textAlign = t.align;
   ctx.textBaseline = "top";
-  const x = t.align === "center" ? t.x + t.w / 2 : t.align === "right" ? t.x + t.w : t.x;
+  
   const lines = wrapCanvasText(ctx, t.text, t.w);
-  const lh = t.fontSize * 1.35;
+  const lh = t.fontSize * (t.lineHeight ?? 1.4);
+  const totalHeight = Math.max(t.h, lines.length * lh);
+
+  // Vẽ nền (nếu có)
+  if (t.backgroundColor) {
+    ctx.save();
+    ctx.globalAlpha = t.backgroundOpacity ?? 1;
+    ctx.fillStyle = t.backgroundColor;
+    ctx.fillRect(t.x, t.y, t.w, totalHeight);
+    ctx.restore();
+  }
+
+  // Chỉnh màu chữ
+  ctx.fillStyle = t.color;
+  const x = t.align === "center" ? t.x + t.w / 2 : t.align === "right" ? t.x + t.w : t.x;
+  
   lines.forEach((line, i) => {
-    ctx.fillText(line, x, t.y + i * lh);
+    const lineY = t.y + i * lh;
+    ctx.fillText(line, x, lineY);
+    
+    // Xử lý gạch chân
+    if (t.textDecoration === "underline") {
+      const textMetrics = ctx.measureText(line);
+      let lineX = t.x;
+      if (t.align === "center") {
+        lineX = x - textMetrics.width / 2;
+      } else if (t.align === "right") {
+        lineX = x - textMetrics.width;
+      }
+      
+      const underlineY = lineY + t.fontSize * 1.1;
+      const underlineThickness = Math.max(1, t.fontSize * 0.05);
+      
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = t.color;
+      ctx.lineWidth = underlineThickness;
+      ctx.moveTo(lineX, underlineY);
+      ctx.lineTo(lineX + textMetrics.width, underlineY);
+      ctx.stroke();
+      ctx.restore();
+    }
   });
   ctx.restore();
 }
@@ -291,8 +334,12 @@ export function strokeToSvgPath(s: StrokeObject) {
   const pts = s.points;
   if (!pts.length) return "";
   let d = `M ${pts[0]!.x.toFixed(2)} ${pts[0]!.y.toFixed(2)}`;
-  for (let i = 1; i < pts.length; i++) {
-    d += ` L ${pts[i]!.x.toFixed(2)} ${pts[i]!.y.toFixed(2)}`;
+  if (pts.length === 1) {
+    d += ` L ${(pts[0]!.x + 0.01).toFixed(2)} ${pts[0]!.y.toFixed(2)}`;
+  } else {
+    for (let i = 1; i < pts.length; i++) {
+      d += ` L ${pts[i]!.x.toFixed(2)} ${pts[i]!.y.toFixed(2)}`;
+    }
   }
   return d;
 }

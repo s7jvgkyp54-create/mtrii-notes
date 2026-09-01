@@ -14,7 +14,7 @@ import {
 } from "./types";
 import { dumpAll, getAsset } from "./db";
 import { sha256Hex } from "@/lib/utils";
-import { strokeToSvgPath } from "./render";
+import { strokeToSvgPath, wrapCanvasText } from "./render";
 
 export const BACKUP_README = `Định dạng sao lưu Notes (.notesbackup)
 ====================================
@@ -64,6 +64,7 @@ async function drawObjectsOnPdfPage(
         pdfPage.drawSvgPath(path, {
           x: 0,
           y: pageH,
+          color: undefined,
           borderColor: hexRgb(o.color),
           borderWidth: o.width,
           borderOpacity:
@@ -72,7 +73,7 @@ async function drawObjectsOnPdfPage(
               : o.tool === "pencil"
                 ? 0.78
                 : 1,
-          borderLineCap: LineCapStyle.Round,
+          borderLineCap: o.tool === "highlighter" ? LineCapStyle.Butt : LineCapStyle.Round,
           blendMode:
             o.tool === "highlighter"
               ? BlendMode.Multiply
@@ -81,14 +82,62 @@ async function drawObjectsOnPdfPage(
       }
     } else if (o.type === "text") {
       if (customFont) {
-        const lines = o.text.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          pdfPage.drawText(lines[i], {
-            x: o.x,
-            y: pageH - o.y - (i * o.fontSize * 1.35) - o.fontSize,
-            size: o.fontSize,
-            font: customFont,
-            color: hexRgb(o.color),
+        // Create dummy canvas to measure text wrapping properly
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          const fontWeight = o.fontWeight || "normal";
+          const fontStyle = o.fontStyle || "normal";
+          const fontFamily = o.fontFamily || "Be Vietnam Pro";
+          ctx.font = `${fontStyle} ${fontWeight} ${o.fontSize}px "${fontFamily}", "Segoe UI", sans-serif`;
+          
+          const lines = wrapCanvasText(ctx, o.text, o.w);
+          const lh = o.fontSize * (o.lineHeight ?? 1.4);
+          const totalHeight = Math.max(o.h, lines.length * lh);
+          const pdfY = pageH - o.y;
+
+          // Draw background if present
+          if (o.backgroundColor) {
+            pdfPage.drawRectangle({
+              x: o.x,
+              y: pdfY - totalHeight,
+              width: o.w,
+              height: totalHeight,
+              color: hexRgb(o.backgroundColor),
+              opacity: o.backgroundOpacity ?? 1,
+            });
+          }
+
+          const fontToUse = customFont;
+          lines.forEach((line, i) => {
+            const textWidth = fontToUse.widthOfTextAtSize(line, o.fontSize);
+            let lineX = o.x;
+            if (o.align === "center") {
+              lineX = o.x + (o.w - textWidth) / 2;
+            } else if (o.align === "right") {
+              lineX = o.x + o.w - textWidth;
+            }
+            
+            const linePdfY = pdfY - (i * lh) - o.fontSize;
+            
+            pdfPage.drawText(line, {
+              x: lineX,
+              y: linePdfY,
+              size: o.fontSize,
+              font: fontToUse,
+              color: hexRgb(o.color),
+            });
+            
+            // Draw underline if present
+            if (o.textDecoration === "underline") {
+              const underlineThickness = Math.max(1, o.fontSize * 0.05);
+              pdfPage.drawLine({
+                start: { x: lineX, y: linePdfY - o.fontSize * 0.1 },
+                end: { x: lineX + textWidth, y: linePdfY - o.fontSize * 0.1 },
+                thickness: underlineThickness,
+                color: hexRgb(o.color),
+              });
+            }
           });
         }
       }

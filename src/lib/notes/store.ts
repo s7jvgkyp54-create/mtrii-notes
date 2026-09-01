@@ -34,6 +34,13 @@ export interface ToolState {
   eraserMode: EraserMode;
   eraserWidth: number;
   fontSize: number;
+  fontFamily?: string;
+  fontWeight?: "normal" | "bold";
+  fontStyle?: "normal" | "italic";
+  textDecoration?: "none" | "underline";
+  textAlign?: "left" | "center" | "right";
+  textBgColor?: string | null;
+  textBgOpacity?: number;
   shapeSnap: boolean;
 }
 
@@ -46,6 +53,13 @@ const defaultTool: ToolState = {
   eraserMode: "stroke",
   eraserWidth: 16,
   fontSize: 22,
+  fontFamily: "Be Vietnam Pro",
+  fontWeight: "normal",
+  fontStyle: "normal",
+  textDecoration: "none",
+  textAlign: "left",
+  textBgColor: null,
+  textBgOpacity: 1,
   shapeSnap: true,
 };
 
@@ -657,6 +671,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         // in the browser it removes the IndexedDB blob and releases its quota.
         await db.delAsset(assetId);
       }
+      if (n?.editorType === "document") {
+        await db.delDocument(id);
+      }
       await db.delNotebook(id);
     });
   },
@@ -708,7 +725,11 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     }
   },
 
-  flushPendingWrites: () => drainPendingObjectSaves(true),
+  flushPendingWrites: async () => {
+    await drainPendingObjectSaves(true);
+    const { flushAllDocuments } = await import("@/lib/notes/document-save");
+    await flushAllDocuments();
+  },
 
   setPageIndex: (index) => {
     set({ currentPageIndex: index });

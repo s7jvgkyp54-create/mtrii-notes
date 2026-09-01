@@ -576,7 +576,13 @@ export function PageSurface({
         text: "",
         fontSize: tool.fontSize,
         color: tool.color,
-        align: "left",
+        align: tool.textAlign || "left",
+        fontFamily: tool.fontFamily,
+        fontWeight: tool.fontWeight,
+        fontStyle: tool.fontStyle,
+        textDecoration: tool.textDecoration,
+        backgroundColor: tool.textBgColor,
+        backgroundOpacity: tool.textBgOpacity,
       };
       setEditing(t);
       return;
@@ -681,11 +687,80 @@ export function PageSurface({
     }
 
     if (drag.current?.kind === "move") {
+      const draggedIds = new Set(drag.current.ids);
       drag.current = null;
+      
       const current = localRef.current ?? useNotesStore.getState().objectsByPage[page.id] ?? objects;
-      useNotesStore
-        .getState()
-        .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      let targetPageId = page.id;
+      let targetRect: DOMRect | null = null;
+      
+      // Tạm thời tắt pointer-events để tìm phần tử bên dưới
+      const canvasEl = ev.currentTarget;
+      const prevPointerEvents = canvasEl.style.pointerEvents;
+      canvasEl.style.pointerEvents = "none";
+      const elUnder = document.elementFromPoint(ev.clientX, ev.clientY);
+      canvasEl.style.pointerEvents = prevPointerEvents;
+      
+      const targetPageEl = elUnder?.closest("[data-page-id]");
+      if (targetPageEl) {
+        const id = targetPageEl.getAttribute("data-page-id");
+        if (id && id !== page.id) {
+          targetPageId = id;
+          targetRect = targetPageEl.getBoundingClientRect();
+        }
+      }
+
+      if (targetPageId !== page.id && targetRect) {
+        // Xử lý chuyển đối tượng sang trang mới (re-parenting)
+        const currentRect = liveRef.current!.getBoundingClientRect();
+        
+        const keptObjects = current.filter(o => !draggedIds.has(o.id));
+        const movedObjects = current.filter(o => draggedIds.has(o.id)).map(o => {
+          if (o.type === 'image' || o.type === 'text') {
+            const screenX = currentRect.left + o.x * zoom;
+            const screenY = currentRect.top + o.y * zoom;
+            return {
+              ...o,
+              x: (screenX - targetRect!.left) / zoom,
+              y: (screenY - targetRect!.top) / zoom
+            };
+          } else if (o.type === 'shape') {
+             const screenX1 = currentRect.left + o.x1 * zoom;
+             const screenY1 = currentRect.top + o.y1 * zoom;
+             const screenX2 = currentRect.left + o.x2 * zoom;
+             const screenY2 = currentRect.top + o.y2 * zoom;
+             return {
+                ...o,
+                x1: (screenX1 - targetRect!.left) / zoom,
+                y1: (screenY1 - targetRect!.top) / zoom,
+                x2: (screenX2 - targetRect!.left) / zoom,
+                y2: (screenY2 - targetRect!.top) / zoom
+             };
+          } else if (o.type === 'stroke') {
+             return {
+                ...o,
+                points: o.points.map(p => ({
+                   ...p,
+                   x: ((currentRect.left + p.x * zoom) - targetRect!.left) / zoom,
+                   y: ((currentRect.top + p.y * zoom) - targetRect!.top) / zoom
+                }))
+             };
+          }
+          return o;
+        });
+
+        useNotesStore.getState().commitObjects(page.id, keptObjects, true, strokeBeforeState.current ?? undefined);
+        
+        const targetCurrentObjects = useNotesStore.getState().objectsByPage[targetPageId] ?? [];
+        useNotesStore.getState().commitObjects(targetPageId, [...targetCurrentObjects, ...movedObjects], false);
+        
+        setSelected([]);
+        window.dispatchEvent(new CustomEvent("notes-select-objects", { detail: { pageId: targetPageId, objectIds: Array.from(draggedIds) } }));
+      } else {
+        useNotesStore
+          .getState()
+          .commitObjects(page.id, current, true, strokeBeforeState.current ?? undefined);
+      }
       strokeBeforeState.current = null;
       return;
     }
@@ -769,6 +844,57 @@ export function PageSurface({
       scheduleLocalObjects(next);
     }
   }
+
+  useEffect(() => {
+    function onTextStyleChange(e: Event) {
+      const customEvent = e as CustomEvent<Partial<import("@/lib/notes/store").ToolState>>;
+      const patch = customEvent.detail;
+      
+      const applyPatch = (obj: Extract<CanvasObject, { type: "text" }>) => ({
+        ...obj,
+        ...(patch.fontFamily !== undefined && { fontFamily: patch.fontFamily }),
+        ...(patch.fontWeight !== undefined && { fontWeight: patch.fontWeight }),
+        ...(patch.fontStyle !== undefined && { fontStyle: patch.fontStyle }),
+        ...(patch.textDecoration !== undefined && { textDecoration: patch.textDecoration }),
+        ...(patch.textAlign !== undefined && { align: patch.textAlign }),
+        ...(patch.color !== undefined && { color: patch.color }),
+        ...(patch.textBgColor !== undefined && { backgroundColor: patch.textBgColor }),
+        ...(patch.textBgOpacity !== undefined && { backgroundOpacity: patch.textBgOpacity }),
+        ...(patch.fontSize !== undefined && { fontSize: patch.fontSize }),
+      });
+
+      setEditing((prev) => (prev ? applyPatch(prev) : null));
+      
+      if (!active || selected.length === 0) return;
+      const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+      let changed = false;
+      const next = current.map((o) => {
+        if (o.type === "text" && selected.includes(o.id)) {
+          changed = true;
+          return applyPatch(o);
+        }
+        return o;
+      });
+      if (changed) {
+        useNotesStore.getState().commitObjects(page.id, next, true);
+      }
+    }
+    window.addEventListener("notes-text-style-change", onTextStyleChange);
+    
+    function onSelectObjects(e: Event) {
+      const customEvent = e as CustomEvent<{ pageId: string; objectIds: string[] }>;
+      if (customEvent.detail.pageId === page.id) {
+        setSelected(customEvent.detail.objectIds);
+        activatePage();
+      }
+    }
+    window.addEventListener("notes-select-objects", onSelectObjects);
+    
+    return () => {
+      window.removeEventListener("notes-text-style-change", onTextStyleChange);
+      window.removeEventListener("notes-select-objects", onSelectObjects);
+    };
+  }, [active, objects, page.id, selected]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -893,17 +1019,19 @@ export function PageSurface({
     if (session.handle.includes('t')) newH = anchorY - pageY;
     if (session.handle.includes('b')) newH = pageY - anchorY;
 
+    if (session.handle.length === 2 && !shiftKey) {
+      const Dx = session.handle.includes('l') ? -session.box.w : session.box.w;
+      const Dy = session.handle.includes('t') ? -session.box.h : session.box.h;
+      const Mx = pageX - anchorX;
+      const My = pageY - anchorY;
+      const scale = (Mx * Dx + My * Dy) / (Dx * Dx + Dy * Dy);
+      
+      newW = session.box.w * scale;
+      newH = session.box.h * scale;
+    }
+
     newW = Math.max(40, newW);
     newH = Math.max(40, newH);
-
-    if (session.handle.length === 2 && !shiftKey) {
-      const aspect = session.box.w / session.box.h;
-      if (newW / session.box.w > newH / session.box.h) {
-        newH = newW / aspect;
-      } else {
-        newW = newH * aspect;
-      }
-    }
 
     const scaleX = newW / Math.max(1, session.box.w);
     const scaleY = newH / Math.max(1, session.box.h);
@@ -972,7 +1100,8 @@ export function PageSurface({
   return (
     <div
       ref={wrapRef}
-      className="page-shadow relative bg-paper"
+      data-page-id={page.id}
+      className={`page-shadow relative bg-paper ${drag.current?.kind === "move" || active ? "z-10" : "z-0"}`}
       style={{ width: cssW, height: cssH }}
       onDragEnter={onDragOver}
       onDragOver={onDragOver}
@@ -1092,7 +1221,14 @@ export function PageSurface({
               height: Math.max(40, editing.h * zoom),
               fontSize: editing.fontSize * zoom,
               color: editing.color,
-              fontFamily: "Be Vietnam Pro, sans-serif",
+              fontFamily: `${editing.fontFamily || "Be Vietnam Pro"}, sans-serif`,
+              fontWeight: editing.fontWeight || "normal",
+              fontStyle: editing.fontStyle || "normal",
+              textDecoration: editing.textDecoration || "none",
+              textAlign: editing.align || "left",
+              backgroundColor: editing.backgroundColor 
+                ? `${editing.backgroundColor}${Math.round((editing.backgroundOpacity ?? 1) * 255).toString(16).padStart(2, '0')}` 
+                : "transparent",
               zIndex: 50,
               lineHeight: 1.4,
             }}
@@ -1401,7 +1537,9 @@ function scaleObjectFromOrigin(
     y: position.y,
     w: Math.max(40, object.w * scaleX),
     h: Math.max(40, object.h * scaleY),
-    ...(object.type === "text" ? { fontSize: Math.max(8, object.fontSize * maxScale) } : {}),
+    ...(object.type === "text" 
+      ? { fontSize: Math.max(8, object.fontSize * (Math.abs(scaleX - 1) > 0.01 && Math.abs(scaleY - 1) > 0.01 ? maxScale : 1)) } 
+      : {}),
   };
 }
 

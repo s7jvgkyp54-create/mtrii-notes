@@ -116,3 +116,8 @@ export async function flushSaveDocument(noteId: string) {
     await performSave(noteId, pending.doc, pending.revision);
   }
 }
+
+export async function flushAllDocuments() {
+  const promises = Object.keys(pendingSaves).map(noteId => flushSaveDocument(noteId));
+  await Promise.all(promises);
+}
