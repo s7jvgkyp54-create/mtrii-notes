@@ -23,6 +23,9 @@ import { loadStoredPdfDocument, renderPdfPageBitmap } from "@/lib/notes/pdf";
 import { loadAssetImage } from "@/lib/notes/image-cache";
 import { nid } from "@/lib/utils";
 import { TextEditorOverlay } from "./text-tool/text-editor-overlay";
+import { TextSelectionOverlay } from "./text-tool/text-selection-overlay";
+import { TextContextToolbar } from "./text-tool/text-context-toolbar";
+import { autoResizeTextObject } from "./text-tool/text-layout";
 import { Button } from "@/components/ui/button";
 import {
   Copy,
@@ -581,13 +584,34 @@ export function PageSurface({
     const pressure = ev.pressure > 0 ? ev.pressure : 0.5;
     strokeBeforeState.current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
 
+    const startDragSession = (ids: string[], kind: "move" = "move", startPt: Pt = p) => {
+      drag.current = {
+        kind,
+        last: startPt,
+        ids,
+        totalDx: 0,
+        totalDy: 0,
+        active: false,
+        startClientX: ev.clientX,
+        startClientY: ev.clientY,
+      };
+      drawing.current = true;
+    };
+
     if (tool.name === "text") {
       ev.preventDefault();
       const hit = [...objects].reverse().find((o) => o.type === "text" && hitTest(o, p, 2));
-      if (hit && hit.type === "text") {
-        setEditing(hit);
+      
+      if (hit) {
+        if (selected.includes(hit.id)) {
+          startDragSession(selected);
+        } else {
+          setSelected([hit.id]);
+          startDragSession([hit.id]);
+        }
         return;
       }
+
       // Create text object but do NOT commit until user types something (avoid blank flash)
       const t: Extract<CanvasObject, { type: "text" }> = {
         id: nid(),
@@ -618,20 +642,6 @@ export function PageSurface({
 
     if (tool.name === "lasso") {
       const hit = [...objects].reverse().find((o) => hitTest(o, p, 6));
-
-      const startDragSession = (ids: string[]) => {
-        drag.current = {
-          kind: "move",
-          last: p,
-          ids,
-          totalDx: 0,
-          totalDy: 0,
-          active: false,
-          startClientX: ev.clientX,
-          startClientY: ev.clientY,
-        };
-        drawing.current = true;
-      };
 
       if (hit && selected.includes(hit.id)) {
         startDragSession(selected);
@@ -1193,7 +1203,7 @@ export function PageSurface({
           </div>
         </div>
       ) : null}
-      {selectionBounds && selected.length && page.rotation === 0 ? (
+      {selectionBounds && selected.length && page.rotation === 0 && !onlyTextSelected ? (
         <div
           className="pointer-events-none absolute z-20 border border-accent"
           style={{
@@ -1269,6 +1279,17 @@ export function PageSurface({
           </button>
         </div>
       ) : null}
+      {selectionBounds && onlyTextSelected && page.rotation === 0 ? (
+        <TextSelectionOverlay
+          object={selectedObjects[0] as Extract<CanvasObject, { type: "text" }>}
+          zoom={zoom}
+          rotation={page.rotation}
+          pageWidth={page.width}
+          pageHeight={page.height}
+          onResizeStart={startResizeSession}
+          onEdit={() => setEditing(selectedObjects[0] as Extract<CanvasObject, { type: "text" }>)}
+        />
+      ) : null}
       {editing ? (
         <TextEditorOverlay
           key={editing.id}
@@ -1298,7 +1319,7 @@ export function PageSurface({
           }}
         />
       ) : null}
-      {selectionBounds && selected.length ? (
+      {selectionBounds && selected.length && !onlyTextSelected ? (
         <div
           className="selection-toolbar absolute z-30 flex items-center gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-1 text-fg"
           style={{
@@ -1445,6 +1466,25 @@ export function PageSurface({
           </Button>
         </div>
       ) : null}
+      {onlyTextSelected && selectionBounds && !editing ? (
+        <TextContextToolbar
+          object={selectedObjects[0] as Extract<CanvasObject, { type: "text" }>}
+          zoom={zoom}
+          rotation={page.rotation}
+          pageWidth={page.width}
+          pageHeight={page.height}
+          onUpdate={(patch) => {
+            const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+            const updated = current.map((o) => (o.id === selected[0] ? autoResizeTextObject({ ...o, ...patch } as any) : o));
+            commit(updated);
+          }}
+          onDelete={() => {
+            commit(objects.filter((object) => object.id !== selected[0]));
+            setSelected([]);
+          }}
+          onEdit={() => setEditing(selectedObjects[0] as Extract<CanvasObject, { type: "text" }>)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1537,7 +1577,7 @@ function scaleObjectFromOrigin(
   }
 
   const position = scale(object.x, object.y);
-  return {
+  const result = {
     ...object,
     x: position.x,
     y: position.y,
@@ -1547,6 +1587,12 @@ function scaleObjectFromOrigin(
       ? { fontSize: Math.max(8, object.fontSize * (Math.abs(scaleX - 1) > 0.01 && Math.abs(scaleY - 1) > 0.01 ? maxScale : 1)) } 
       : {}),
   };
+  
+  if (result.type === "text" && (Math.abs(scaleX - 1) <= 0.01 || Math.abs(scaleY - 1) <= 0.01)) {
+    // 1D scale (width change), auto resize height
+    return autoResizeTextObject(result as Extract<CanvasObject, { type: "text" }>);
+  }
+  return result;
 }
 
 function rotateObject(
