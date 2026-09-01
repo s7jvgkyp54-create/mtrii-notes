@@ -8,6 +8,9 @@ import type {
   Folder,
   Notebook,
   PageRecord,
+  StoredDocumentContent,
+  NoteLink,
+  NoteVersion,
 } from "./types";
 import * as desktop from "./desktop-db";
 import { normalizeSettings } from "./validation";
@@ -21,10 +24,13 @@ interface NotesDB extends DBSchema {
   bookmarks: { key: string; value: Bookmark; indexes: { "by-notebook": string } };
   kv: { key: string; value: unknown };
   backups: { key: string; value: BackupRecord };
+  documents: { key: string; value: StoredDocumentContent };
+  note_links: { key: string; value: NoteLink; indexes: { "by-source": string; "by-target": string } };
+  note_versions: { key: string; value: NoteVersion; indexes: { "by-note": string } };
 }
 
 const DB_NAME = "notes-app";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface LibraryDump {
   folders: Folder[];
@@ -42,17 +48,29 @@ let dbPromise: Promise<IDBPDatabase<NotesDB>> | null = null;
 export function getDb() {
   if (!dbPromise) {
     dbPromise = openDB<NotesDB>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        db.createObjectStore("folders", { keyPath: "id" });
-        db.createObjectStore("notebooks", { keyPath: "id" });
-        const pages = db.createObjectStore("pages", { keyPath: "id" });
-        pages.createIndex("by-notebook", "notebookId");
-        db.createObjectStore("pageObjects", { keyPath: "pageId" });
-        db.createObjectStore("assets", { keyPath: "id" });
-        const bm = db.createObjectStore("bookmarks", { keyPath: "id" });
-        bm.createIndex("by-notebook", "notebookId");
-        db.createObjectStore("kv");
-        db.createObjectStore("backups", { keyPath: "id" });
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore("folders", { keyPath: "id" });
+          db.createObjectStore("notebooks", { keyPath: "id" });
+          const pages = db.createObjectStore("pages", { keyPath: "id" });
+          pages.createIndex("by-notebook", "notebookId");
+          db.createObjectStore("pageObjects", { keyPath: "pageId" });
+          db.createObjectStore("assets", { keyPath: "id" });
+          const bm = db.createObjectStore("bookmarks", { keyPath: "id" });
+          bm.createIndex("by-notebook", "notebookId");
+          db.createObjectStore("kv");
+          db.createObjectStore("backups", { keyPath: "id" });
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore("documents", { keyPath: "noteId" });
+          
+          const noteLinks = db.createObjectStore("note_links", { keyPath: "id" });
+          noteLinks.createIndex("by-source", "sourceNoteId");
+          noteLinks.createIndex("by-target", "targetNoteId");
+          
+          const noteVersions = db.createObjectStore("note_versions", { keyPath: "id" });
+          noteVersions.createIndex("by-note", "noteId");
+        }
       },
     });
   }

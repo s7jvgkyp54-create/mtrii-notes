@@ -12,6 +12,32 @@ export type Rotation = 0 | 90 | 180 | 270;
 export type EraserMode = "stroke" | "partial" | "highlighter";
 export type PageMode = "continuous" | "single";
 export type LibrarySection = "all" | "recent" | "favorites" | "trash";
+export type NotebookEditorType = "canvas" | "document";
+
+export interface StoredDocumentContent {
+  schemaVersion: 1;
+  type: "tiptap";
+  doc: {
+    type: "doc";
+    content?: unknown[];
+  };
+}
+
+export interface NoteLink {
+  id: string;
+  sourceNoteId: string;
+  targetNoteId: string;
+  createdAt: number;
+}
+
+export interface NoteVersion {
+  id: string;
+  noteId: string;
+  content: string;
+  contentHash: string;
+  createdAt: number;
+  reason: string;
+}
 
 export type PenKind = "ballpoint" | "fountain" | "pencil" | "highlighter";
 
@@ -64,6 +90,7 @@ export interface Notebook {
   lastPageIndex: number;
   lastZoom: number;
   deletedAt: number | null;
+  editorType?: NotebookEditorType;
 }
 
 export interface PageRecord {

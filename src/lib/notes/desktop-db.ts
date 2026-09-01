@@ -9,9 +9,7 @@ import type {
   PageRecord
 } from "./types";
 import { normalizeSettings } from "./validation";
-
-type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups" | "pomodoroHistory";
-
+type Entity = "folders" | "notebooks" | "pages" | "pageObjects" | "bookmarks" | "tombstones" | "backups" | "pomodoroHistory" | "documents" | "note_links" | "note_versions";
 type AssetPayload = {
   meta: Omit<AssetRecord, "blob">;
   bytes: number[];

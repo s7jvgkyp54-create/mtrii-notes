@@ -389,6 +389,37 @@ fn run_migrations(connection: &mut Connection) -> Result<(), String> {
             .map_err(err)?;
         transaction.commit().map_err(err)?;
     }
+
+    let has_v4 = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM migrations WHERE version=4)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(err)?;
+    if !has_v4 {
+        let transaction = connection.transaction().map_err(err)?;
+        transaction
+            .execute_batch(
+                r#"
+                CREATE TABLE IF NOT EXISTS documents (
+                  id TEXT PRIMARY KEY,
+                  data TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS note_links (
+                  id TEXT PRIMARY KEY,
+                  data TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS note_versions (
+                  id TEXT PRIMARY KEY,
+                  data TEXT NOT NULL
+                );
+                INSERT INTO migrations(version) VALUES (4);
+                "#,
+            )
+            .map_err(err)?;
+        transaction.commit().map_err(err)?;
+    }
     Ok(())
 }
 
