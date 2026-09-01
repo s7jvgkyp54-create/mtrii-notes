@@ -1270,6 +1270,7 @@ export function PageSurface({
       ) : null}
       {editing ? (
         <TextEditorOverlay
+          key={editing.id}
           editing={editing}
           zoom={zoom}
           pageWidth={page.width}
@@ -1284,7 +1285,7 @@ export function PageSurface({
             } else {
               commit([...current, nextText]);
             }
-            setEditing(null);
+            setEditing((prev) => (prev?.id === editing.id ? null : prev));
           }}
           onCancel={() => {
             const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
@@ -1292,7 +1293,7 @@ export function PageSurface({
             if (exists && !editing.text) {
               commit(current.filter((o) => o.id !== editing.id));
             }
-            setEditing(null);
+            setEditing((prev) => (prev?.id === editing.id ? null : prev));
           }}
         />
       ) : null}

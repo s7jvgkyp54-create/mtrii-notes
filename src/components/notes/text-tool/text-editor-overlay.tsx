@@ -26,6 +26,11 @@ export function TextEditorOverlay({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastCommitRef = useRef(false);
 
+  const callbacksRef = useRef({ onCommit, onCancel });
+  useEffect(() => {
+    callbacksRef.current = { onCommit, onCancel };
+  }, [onCommit, onCancel]);
+
   // Auto-resize
   useEffect(() => {
     const el = textareaRef.current;
@@ -44,13 +49,13 @@ export function TextEditorOverlay({
         if (final) {
           const w = Math.max(120, el.offsetWidth / zoom);
           const h = Math.max(editing.fontSize * 1.5, el.scrollHeight / zoom);
-          onCommit(final, w, h);
+          callbacksRef.current.onCommit(final, w, h);
         } else if (!editing.text) {
-          onCancel();
+          callbacksRef.current.onCancel();
         }
       }
     };
-  }, [editing.text, zoom, onCommit, onCancel]);
+  }, [editing.text, zoom]);
 
   const handleCommit = (el: HTMLTextAreaElement) => {
     if (isComposing) return;
