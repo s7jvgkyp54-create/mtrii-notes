@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, BlendMode, LineCapStyle } from "pdf-lib";
+import { PDFDocument, rgb, BlendMode, degrees } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import JSZip from "jszip";
 import {
@@ -246,6 +246,10 @@ export async function exportNotebookPdf(opts: {
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i]!;
     const pdfPage = pdf.getPage(Math.min(i, pdf.getPageCount() - 1));
+    if (page.rotation) {
+      const currentRot = pdfPage.getRotation().angle;
+      pdfPage.setRotation(degrees(currentRot + page.rotation)); 
+    }
     const objs = objects[page.id] ?? [];
     await drawObjectsOnPdfPage(pdf, pdfPage, objs, pdfPage.getWidth(), pdfPage.getHeight(), imageCache, customFont);
   }

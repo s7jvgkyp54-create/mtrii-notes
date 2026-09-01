@@ -22,6 +22,7 @@ import { putAsset } from "@/lib/notes/db";
 import { loadStoredPdfDocument, renderPdfPageBitmap } from "@/lib/notes/pdf";
 import { loadAssetImage } from "@/lib/notes/image-cache";
 import { nid } from "@/lib/utils";
+import { TextEditorOverlay } from "./text-tool/text-editor-overlay";
 import { Button } from "@/components/ui/button";
 import {
   Copy,
@@ -1268,90 +1269,33 @@ export function PageSurface({
         </div>
       ) : null}
       {editing ? (
-          <textarea
-            autoFocus
-            rows={2}
-            placeholder="Nhập nội dung…"
-            className="absolute resize overflow-auto rounded-md border-2 border-accent bg-surface-2/95 p-2 text-fg outline-none shadow-lg"
-            style={{
-              left: editing.x * zoom,
-              top: editing.y * zoom,
-              width: Math.max(120, editing.w * zoom),
-              height: Math.max(40, editing.h * zoom),
-              fontSize: editing.fontSize * zoom,
-              color: editing.color,
-              fontFamily: `${editing.fontFamily || "Be Vietnam Pro"}, sans-serif`,
-              fontWeight: editing.fontWeight || "normal",
-              fontStyle: editing.fontStyle || "normal",
-              textDecoration: editing.textDecoration || "none",
-              textAlign: editing.align || "left",
-              backgroundColor: editing.backgroundColor 
-                ? `${editing.backgroundColor}${Math.round((editing.backgroundOpacity ?? 1) * 255).toString(16).padStart(2, '0')}` 
-                : "transparent",
-              zIndex: 50,
-              lineHeight: 1.4,
-            }}
-            defaultValue={editing.text}
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(e) => {
-              const el = e.currentTarget;
-              el.style.height = "auto";
-              el.style.height = `${Math.max(editing.fontSize * 1.5 * zoom, el.scrollHeight)}px`;
-              
-              if (textSaveTimer.current) clearTimeout(textSaveTimer.current);
-              textSaveTimer.current = setTimeout(() => {
-                const text = el.value.trimEnd();
-                if (!text.trim()) return;
-                const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-                const exists = current.some((o) => o.id === editing.id);
-                const nextText = {
-                  ...editing,
-                  text,
-                  w: Math.max(120, el.offsetWidth / zoom),
-                  h: Math.max(editing.fontSize * 1.5, el.scrollHeight / zoom),
-                };
-                if (exists) {
-                  useNotesStore.getState().commitObjects(page.id, current.map((o) => (o.id === editing.id && o.type === "text" ? nextText : o)), true);
-                } else {
-                  useNotesStore.getState().commitObjects(page.id, [...current, nextText], true);
-                }
-              }, 500);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.currentTarget.value = editing.text;
-                if (textSaveTimer.current) clearTimeout(textSaveTimer.current);
-                event.currentTarget.blur();
-              } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-            }}
-            onBlur={(e) => {
-              if (textSaveTimer.current) clearTimeout(textSaveTimer.current);
-              const text = e.target.value.trimEnd();
-              const nextText = {
-                ...editing,
-                text,
-                w: Math.max(120, e.currentTarget.offsetWidth / zoom),
-                h: Math.max(editing.fontSize * 1.5, e.currentTarget.scrollHeight / zoom),
-              };
-              const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
-              const exists = current.some((o) => o.id === editing.id);
-              if (text.trim()) {
-                if (exists) {
-                  commit(current.map((o) => (o.id === editing.id && o.type === "text" ? nextText : o)));
-                } else {
-                  commit([...current, nextText]);
-                }
-              } else if (exists) {
-                commit(current.filter((o) => o.id !== editing.id));
-              }
-              setEditing(null);
-            }}
-          />
-        ) : null}
+        <TextEditorOverlay
+          editing={editing}
+          zoom={zoom}
+          pageWidth={page.width}
+          pageHeight={page.height}
+          rotation={page.rotation}
+          onCommit={(text, w, h) => {
+            const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+            const exists = current.some((o) => o.id === editing.id);
+            const nextText = { ...editing, text, w, h };
+            if (exists) {
+              commit(current.map((o) => (o.id === editing.id && o.type === "text" ? nextText : o)));
+            } else {
+              commit([...current, nextText]);
+            }
+            setEditing(null);
+          }}
+          onCancel={() => {
+            const current = useNotesStore.getState().objectsByPage[page.id] ?? objects;
+            const exists = current.some((o) => o.id === editing.id);
+            if (exists && !editing.text) {
+              commit(current.filter((o) => o.id !== editing.id));
+            }
+            setEditing(null);
+          }}
+        />
+      ) : null}
       {selectionBounds && selected.length ? (
         <div
           className="selection-toolbar absolute z-30 flex items-center gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-1 text-fg"
