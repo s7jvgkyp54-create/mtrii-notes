@@ -13,6 +13,8 @@ import { scheduleSaveDocument, flushSaveDocument } from "@/lib/notes/document-sa
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { all, createLowlight } from "lowlight";
 import { MathExtension } from "@aarkue/tiptap-math-extension";
+import Link from "@tiptap/extension-link";
+import { WikilinkExtension, wikilinkSuggestion } from "./wikilink-extension";
 
 import "highlight.js/styles/github-dark.css";
 import "katex/dist/katex.min.css";
@@ -44,6 +46,13 @@ export const DocumentEditor: React.FC<DocumentEditorProps> = ({ noteId }) => {
       }),
       MathExtension.configure({
         evaluation: false, // Set to true if you want it to evaluate math expressions too
+      }),
+      Link.configure({
+        openOnClick: true,
+        autolink: true,
+      }),
+      WikilinkExtension.configure({
+        suggestion: wikilinkSuggestion,
       }),
     ],
     content: { type: "doc", content: [{ type: "paragraph" }] },
