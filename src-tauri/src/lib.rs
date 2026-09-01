@@ -1251,10 +1251,22 @@ fn native_download_and_install_update(url: String) -> Result<(), String> {
             }
         }
 
-        std::process::Command::new(&file_path)
-            .args(["/S"])
-            .spawn()
-            .map_err(err)?;
+        let mut run_cmd = std::process::Command::new("cmd");
+        run_cmd.creation_flags(CREATE_NO_WINDOW);
+        run_cmd.args([
+            "/C",
+            "ping",
+            "127.0.0.1",
+            "-n",
+            "3",
+            ">",
+            "nul",
+            "&",
+            &file_path.to_string_lossy(),
+            "/S",
+        ])
+        .spawn()
+        .map_err(err)?;
         std::process::exit(0);
     }
     #[cfg(not(target_os = "windows"))]
