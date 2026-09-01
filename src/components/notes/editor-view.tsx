@@ -31,6 +31,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -647,33 +648,38 @@ function TextBtn() {
   };
 
   return (
-    <Popover
-      align="start"
-      open={open}
-      onOpenChange={(newOpen) => {
-        if (newOpen && !active) {
-          setTool({});
-          setOpen(false);
-        } else {
-          setOpen(newOpen);
+    <div className="flex items-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("w-auto min-w-10 gap-1.5 px-2 rounded-r-none", active && "tool-active")}
+        aria-label={`Chữ, cỡ ${fontSize}`}
+        aria-pressed={active}
+        onClick={() => {
+          if (!active) setTool({});
+        }}
+      >
+        <Type />
+        <span className="text-xs tabular-nums">{Math.round(fontSize)}</span>
+      </Button>
+      <Popover
+        align="start"
+        open={open}
+        onOpenChange={setOpen}
+        trigger={
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "w-5 rounded-l-none border-l border-transparent hover:border-border",
+              active && "tool-active border-border/20 hover:border-border/40"
+            )}
+            aria-label="Tùy chọn chữ"
+          >
+            <ChevronDown className="size-3" />
+          </Button>
         }
-      }}
-      trigger={
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("w-auto min-w-14 gap-1.5 px-2", active && "tool-active")}
-          aria-label={`Chữ, cỡ ${fontSize}`}
-          aria-pressed={active}
-          onClick={() => {
-            if (!active) setTool({});
-          }}
-        >
-          <Type />
-          <span className="text-xs tabular-nums">{Math.round(fontSize)}</span>
-        </Button>
-      }
-    >
+      >
       <div className="w-64">
         {/* Font Selection */}
         <div className="mb-4">
@@ -816,6 +822,7 @@ function TextBtn() {
 
       </div>
     </Popover>
+    </div>
   );
 }
 
@@ -824,32 +831,37 @@ function ImageBtn() {
   const [open, setOpen] = useState(false);
 
   return (
-    <Popover
-      align="start"
-      open={open}
-      onOpenChange={(newOpen) => {
-        if (newOpen && !active) {
-          useNotesStore.getState().setTool({ name: "image" });
-          setOpen(false);
-        } else {
-          setOpen(newOpen);
+    <div className="flex items-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("rounded-r-none px-2", active && "tool-active")}
+        aria-label="Thêm ảnh"
+        aria-pressed={active}
+        onClick={() => {
+          if (!active) useNotesStore.getState().setTool({ name: "image" });
+        }}
+      >
+        <ImagePlus />
+      </Button>
+      <Popover
+        align="start"
+        open={open}
+        onOpenChange={setOpen}
+        trigger={
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "w-5 rounded-l-none border-l border-transparent hover:border-border",
+              active && "tool-active border-border/20 hover:border-border/40"
+            )}
+            aria-label="Tùy chọn ảnh"
+          >
+            <ChevronDown className="size-3" />
+          </Button>
         }
-      }}
-      trigger={
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(active && "tool-active")}
-          aria-label="Thêm ảnh"
-          aria-pressed={active}
-          onClick={() => {
-            if (!active) useNotesStore.getState().setTool({ name: "image" });
-          }}
-        >
-          <ImagePlus />
-        </Button>
-      }
-    >
+      >
       <div className="w-64">
         <p className="mb-1 text-sm font-semibold">Thêm ảnh</p>
         <p className="mb-3 text-xs leading-relaxed text-muted">
@@ -883,6 +895,7 @@ function ImageBtn() {
         </button>
       </div>
     </Popover>
+    </div>
   );
 }
 
@@ -895,30 +908,36 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
   const [open, setOpen] = useState(false);
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(newOpen) => {
-        if (newOpen && !active) {
-          useNotesStore.getState().setTool({ name: id });
-          setOpen(false);
-        } else {
-          setOpen(newOpen);
+    <div className="flex items-center">
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("rounded-r-none px-2", active && "tool-active")}
+        aria-label={label}
+        aria-pressed={active}
+        onClick={() => {
+          if (!active) useNotesStore.getState().setTool({ name: id });
+        }}
+      >
+        <Icon />
+      </Button>
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "w-5 rounded-l-none border-l border-transparent hover:border-border",
+              active && "tool-active border-border/20 hover:border-border/40"
+            )}
+            aria-label={`Tùy chọn ${label}`}
+          >
+            <ChevronDown className="size-3" />
+          </Button>
         }
-      }}
-      trigger={
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(active && "tool-active")}
-          aria-label={label}
-          onClick={() => {
-            if (!active) useNotesStore.getState().setTool({ name: id });
-          }}
-        >
-          <Icon />
-        </Button>
-      }
-    >
+      >
       <p className="mb-2 text-xs font-medium">{label}</p>
       <div className="mb-3 flex flex-wrap gap-1.5">
         {colors.map((c) => (
@@ -954,6 +973,7 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
         }
       />
     </Popover>
+    </div>
   );
 }
 
