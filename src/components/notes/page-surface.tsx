@@ -28,7 +28,6 @@ import {
   CopyPlus,
   ImagePlus,
   Minus,
-  MoveDiagonal2,
   Plus,
   RotateCw,
   Trash2,
@@ -120,7 +119,7 @@ export function PageSurface({
     startX: number;
     startY: number;
     box: { x: number; y: number; w: number; h: number };
-    handle: "tl" | "tr" | "bl" | "br";
+    handle: "tl" | "tr" | "bl" | "br" | "t" | "b" | "l" | "r";
     originals: CanvasObject[];
     before: CanvasObject[];
   } | null>(null);
@@ -130,6 +129,7 @@ export function PageSurface({
     pointerId: number;
     clientX: number;
     clientY: number;
+    shiftKey: boolean;
   } | null>(null);
   const drag = useRef<{
     kind: "move" | "lasso";
@@ -816,7 +816,7 @@ export function PageSurface({
     [],
   );
 
-  const startResizeSession = (event: React.PointerEvent, handle: "tl" | "tr" | "bl" | "br") => {
+  const startResizeSession = (event: React.PointerEvent, handle: "tl" | "tr" | "bl" | "br" | "t" | "b" | "l" | "r") => {
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -835,13 +835,14 @@ export function PageSurface({
         pointerId: moveEvent.pointerId,
         clientX: moveEvent.clientX,
         clientY: moveEvent.clientY,
+        shiftKey: moveEvent.shiftKey,
       };
       if (resizeFrameRef.current !== null) return;
       resizeFrameRef.current = window.requestAnimationFrame(() => {
         resizeFrameRef.current = null;
         const pending = pendingResizeMove.current;
         pendingResizeMove.current = null;
-        if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY);
+        if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY, pending.shiftKey);
       });
     };
     const onUp = (upEvent: PointerEvent) => {
@@ -852,7 +853,7 @@ export function PageSurface({
       }
       const pending = pendingResizeMove.current;
       pendingResizeMove.current = null;
-      if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY);
+      if (pending) updateResize(pending.pointerId, pending.clientX, pending.clientY, pending.shiftKey);
       finishResize(upEvent.pointerId);
     };
     window.addEventListener("pointermove", onMove, { passive: false });
@@ -865,40 +866,49 @@ export function PageSurface({
     };
   };
 
-  function updateResize(pointerId: number, clientX: number, clientY: number) {
+  function updateResize(pointerId: number, clientX: number, clientY: number, shiftKey: boolean) {
     const session = resize.current;
     if (!session || session.pointerId !== pointerId) return;
 
-    const dx = (clientX - session.startX) / zoom;
-    const dy = (clientY - session.startY) / zoom;
+    const canvasRect = liveRef.current!.getBoundingClientRect();
+    const pageX = (clientX - canvasRect.left) / zoom;
+    const pageY = (clientY - canvasRect.top) / zoom;
+
+    let anchorX = session.box.x;
+    let anchorY = session.box.y;
     
-    let relativeX = 0;
-    let relativeY = 0;
+    if (session.handle.includes('l')) anchorX = session.box.x + session.box.w;
+    if (session.handle.includes('r')) anchorX = session.box.x;
+    if (session.handle === 't' || session.handle === 'b') anchorX = session.box.x;
     
-    if (session.handle === "br") {
-      relativeX = dx / Math.max(1, session.box.w);
-      relativeY = dy / Math.max(1, session.box.h);
-    } else if (session.handle === "tl") {
-      relativeX = -dx / Math.max(1, session.box.w);
-      relativeY = -dy / Math.max(1, session.box.h);
-    } else if (session.handle === "tr") {
-      relativeX = dx / Math.max(1, session.box.w);
-      relativeY = -dy / Math.max(1, session.box.h);
-    } else if (session.handle === "bl") {
-      relativeX = -dx / Math.max(1, session.box.w);
-      relativeY = dy / Math.max(1, session.box.h);
+    if (session.handle.includes('t')) anchorY = session.box.y + session.box.h;
+    if (session.handle.includes('b')) anchorY = session.box.y;
+    if (session.handle === 'l' || session.handle === 'r') anchorY = session.box.y;
+
+    let newW = session.box.w;
+    let newH = session.box.h;
+    
+    if (session.handle.includes('l')) newW = anchorX - pageX;
+    if (session.handle.includes('r')) newW = pageX - anchorX;
+    if (session.handle.includes('t')) newH = anchorY - pageY;
+    if (session.handle.includes('b')) newH = pageY - anchorY;
+
+    newW = Math.max(40, newW);
+    newH = Math.max(40, newH);
+
+    if (session.handle.length === 2 && !shiftKey) {
+      const aspect = session.box.w / session.box.h;
+      if (newW / session.box.w > newH / session.box.h) {
+        newH = newW / aspect;
+      } else {
+        newW = newH * aspect;
+      }
     }
 
-    const factor = clamp(
-      1 + (Math.abs(relativeX) >= Math.abs(relativeY) ? relativeX : relativeY),
-      0.15,
-      8,
-    );
-    
-    let origin = { x: session.box.x, y: session.box.y };
-    if (session.handle === "tl") origin = { x: session.box.x + session.box.w, y: session.box.y + session.box.h };
-    else if (session.handle === "tr") origin = { x: session.box.x, y: session.box.y + session.box.h };
-    else if (session.handle === "bl") origin = { x: session.box.x + session.box.w, y: session.box.y };
+    const scaleX = newW / Math.max(1, session.box.w);
+    const scaleY = newH / Math.max(1, session.box.h);
+
+    const origin = { x: anchorX, y: anchorY };
 
     const originals = new Map(session.originals.map((object) => [object.id, object]));
     const state = useNotesStore.getState();
@@ -908,7 +918,7 @@ export function PageSurface({
         ...state.objectsByPage,
         [page.id]: current.map((object) => {
           const original = originals.get(object.id);
-          return original ? scaleObjectFromOrigin(original, origin, factor) : object;
+          return original ? scaleObjectFromOrigin(original, origin, scaleX, scaleY) : object;
         }),
       },
     });
@@ -1005,35 +1015,67 @@ export function PageSurface({
         >
           <button
             type="button"
-            className="pointer-events-auto absolute -top-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
+            className="pointer-events-auto absolute -top-4 -left-4 grid h-8 w-8 place-items-center touch-none cursor-nwse-resize"
             aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "tl")}
           >
-            <MoveDiagonal2 className="size-3.5 rotate-90" />
+            <div className="grid size-4 place-items-center rounded-full border-2 border-surface-2 bg-accent shadow-sm" />
           </button>
           <button
             type="button"
-            className="pointer-events-auto absolute -top-3 -right-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
+            className="pointer-events-auto absolute -top-4 -right-4 grid h-8 w-8 place-items-center touch-none cursor-nesw-resize"
             aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "tr")}
           >
-            <MoveDiagonal2 className="size-3.5" />
+            <div className="grid size-4 place-items-center rounded-full border-2 border-surface-2 bg-accent shadow-sm" />
           </button>
           <button
             type="button"
-            className="pointer-events-auto absolute -bottom-3 -left-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nesw-resize"
+            className="pointer-events-auto absolute -bottom-4 -left-4 grid h-8 w-8 place-items-center touch-none cursor-nesw-resize"
             aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "bl")}
           >
-            <MoveDiagonal2 className="size-3.5" />
+            <div className="grid size-4 place-items-center rounded-full border-2 border-surface-2 bg-accent shadow-sm" />
           </button>
           <button
             type="button"
-            className="pointer-events-auto absolute -right-3 -bottom-3 grid size-7 place-items-center rounded-full border-2 border-surface-2 bg-accent text-accent-fg shadow-md touch-none cursor-nwse-resize"
+            className="pointer-events-auto absolute -bottom-4 -right-4 grid h-8 w-8 place-items-center touch-none cursor-nwse-resize"
             aria-label="Kéo để đổi kích thước"
             onPointerDown={(event) => startResizeSession(event, "br")}
           >
-            <MoveDiagonal2 className="size-3.5 rotate-90" />
+            <div className="grid size-4 place-items-center rounded-full border-2 border-surface-2 bg-accent shadow-sm" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute -top-4 left-1/2 -translate-x-1/2 grid h-8 w-8 place-items-center touch-none cursor-ns-resize"
+            aria-label="Kéo để đổi kích thước"
+            onPointerDown={(event) => startResizeSession(event, "t")}
+          >
+            <div className="h-1.5 w-4 rounded-full border border-surface-2 bg-accent shadow-sm" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute -bottom-4 left-1/2 -translate-x-1/2 grid h-8 w-8 place-items-center touch-none cursor-ns-resize"
+            aria-label="Kéo để đổi kích thước"
+            onPointerDown={(event) => startResizeSession(event, "b")}
+          >
+            <div className="h-1.5 w-4 rounded-full border border-surface-2 bg-accent shadow-sm" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute top-1/2 -left-4 -translate-y-1/2 grid h-8 w-8 place-items-center touch-none cursor-ew-resize"
+            aria-label="Kéo để đổi kích thước"
+            onPointerDown={(event) => startResizeSession(event, "l")}
+          >
+            <div className="h-4 w-1.5 rounded-full border border-surface-2 bg-accent shadow-sm" />
+          </button>
+          <button
+            type="button"
+            className="pointer-events-auto absolute top-1/2 -right-4 -translate-y-1/2 grid h-8 w-8 place-items-center touch-none cursor-ew-resize"
+            aria-label="Kéo để đổi kích thước"
+            onPointerDown={(event) => startResizeSession(event, "r")}
+          >
+            <div className="h-4 w-1.5 rounded-full border border-surface-2 bg-accent shadow-sm" />
           </button>
         </div>
       ) : null}
@@ -1322,17 +1364,20 @@ function scaleObject(
 function scaleObjectFromOrigin(
   object: CanvasObject,
   origin: { x: number; y: number },
-  factor: number,
+  scaleX: number,
+  scaleY: number,
 ): CanvasObject {
   const scale = (x: number, y: number) => ({
-    x: origin.x + (x - origin.x) * factor,
-    y: origin.y + (y - origin.y) * factor,
+    x: origin.x + (x - origin.x) * scaleX,
+    y: origin.y + (y - origin.y) * scaleY,
   });
+
+  const maxScale = Math.max(scaleX, scaleY);
 
   if (object.type === "stroke") {
     return {
       ...object,
-      width: Math.max(0.35, object.width * factor),
+      width: Math.max(0.35, object.width * maxScale),
       points: object.points.map((point) => ({ ...point, ...scale(point.x, point.y) })),
     };
   }
@@ -1345,7 +1390,7 @@ function scaleObjectFromOrigin(
       y1: start.y,
       x2: end.x,
       y2: end.y,
-      width: Math.max(0.35, object.width * factor),
+      width: Math.max(0.35, object.width * maxScale),
     };
   }
 
@@ -1354,9 +1399,9 @@ function scaleObjectFromOrigin(
     ...object,
     x: position.x,
     y: position.y,
-    w: Math.max(12, object.w * factor),
-    h: Math.max(12, object.h * factor),
-    ...(object.type === "text" ? { fontSize: Math.max(8, object.fontSize * factor) } : {}),
+    w: Math.max(40, object.w * scaleX),
+    h: Math.max(40, object.h * scaleY),
+    ...(object.type === "text" ? { fontSize: Math.max(8, object.fontSize * maxScale) } : {}),
   };
 }
 
