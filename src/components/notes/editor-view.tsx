@@ -636,7 +636,7 @@ function TextBtn() {
   const tool = useNotesStore((s) => s.tool);
   const active = tool.name === "text";
   const fontSize = tool.fontSize;
-  const sizes = [14, 18, 22, 28, 36, 48];
+  const [open, setOpen] = useState(false);
   
   const setTool = (patch: Partial<import("@/lib/notes/store").ToolState>) => {
     const state = useNotesStore.getState();
@@ -649,6 +649,15 @@ function TextBtn() {
   return (
     <Popover
       align="start"
+      open={open}
+      onOpenChange={(newOpen) => {
+        if (newOpen && !active) {
+          setTool({});
+          setOpen(false);
+        } else {
+          setOpen(newOpen);
+        }
+      }}
       trigger={
         <Button
           variant="ghost"
@@ -656,7 +665,9 @@ function TextBtn() {
           className={cn("w-auto min-w-14 gap-1.5 px-2", active && "tool-active")}
           aria-label={`Chữ, cỡ ${fontSize}`}
           aria-pressed={active}
-          onClick={() => setTool({})}
+          onClick={() => {
+            if (!active) setTool({});
+          }}
         >
           <Type />
           <span className="text-xs tabular-nums">{Math.round(fontSize)}</span>
@@ -816,7 +827,14 @@ function ImageBtn() {
     <Popover
       align="start"
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(newOpen) => {
+        if (newOpen && !active) {
+          useNotesStore.getState().setTool({ name: "image" });
+          setOpen(false);
+        } else {
+          setOpen(newOpen);
+        }
+      }}
       trigger={
         <Button
           variant="ghost"
@@ -824,7 +842,9 @@ function ImageBtn() {
           className={cn(active && "tool-active")}
           aria-label="Thêm ảnh"
           aria-pressed={active}
-          onClick={() => useNotesStore.getState().setTool({ name: "image" })}
+          onClick={() => {
+            if (!active) useNotesStore.getState().setTool({ name: "image" });
+          }}
         >
           <ImagePlus />
         </Button>
@@ -872,8 +892,19 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
   const colors = id === "highlighter" ? HIGHLIGHTER_COLORS : PEN_COLORS;
   const color = id === "highlighter" ? tool.highlighterColor : tool.color;
   const width = id === "highlighter" ? tool.highlighterWidth : tool.width;
+  const [open, setOpen] = useState(false);
+
   return (
     <Popover
+      open={open}
+      onOpenChange={(newOpen) => {
+        if (newOpen && !active) {
+          useNotesStore.getState().setTool({ name: id });
+          setOpen(false);
+        } else {
+          setOpen(newOpen);
+        }
+      }}
       trigger={
         <Button
           variant="ghost"
