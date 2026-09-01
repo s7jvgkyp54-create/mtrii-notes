@@ -1,6 +1,6 @@
 [package]
 name = "notes"
-version = "0.5.13"
+version = "0.5.14"
 description = "Notes - So tay ghi chu cho Windows"
 authors = ["Developer"]
 edition = "2021"
