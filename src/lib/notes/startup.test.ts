@@ -66,11 +66,11 @@ describe("startup data isolation", () => {
     assert.deepEqual(settings.openTabIds, []);
   });
 
-  it("moves the retired update repository to the current public repository", () => {
-    const settings = normalizeSettings({
-      githubRepo: "s7jvgkyp54-create/mtrii-notes",
-    });
-    assert.equal(settings.githubRepo, "mnhtis/notes");
+  it("moves retired update repositories to the current public repository", () => {
+    for (const githubRepo of ["s7jvgkyp54-create/mtrii-notes", "mnhtis/notes"]) {
+      const settings = normalizeSettings({ githubRepo });
+      assert.equal(settings.githubRepo, "mnhtis1/notes");
+    }
   });
 
   it("quarantines malformed folders and notebooks without mutating valid rows", () => {

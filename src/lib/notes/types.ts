@@ -306,7 +306,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   googleDriveClientId: "",
   googleDriveClientSecret: "",
   googleDriveAccessToken: null,
-  githubRepo: "mnhtis/notes",
+  githubRepo: "mnhtis1/notes",
   lastUpdateCheckAt: null,
   openTabIds: [],
   pageMode: "continuous",

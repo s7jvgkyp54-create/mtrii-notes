@@ -13,11 +13,13 @@ function stringValue(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
 }
 
-const LEGACY_GITHUB_REPOSITORIES = new Set(["s7jvgkyp54-create/mtrii-notes"]);
+const LEGACY_GITHUB_REPOSITORIES = new Set(["s7jvgkyp54-create/mtrii-notes", "mnhtis/notes"]);
 
 function githubRepositoryValue(value: unknown) {
   const repository = stringValue(value, DEFAULT_SETTINGS.githubRepo).trim();
-  return LEGACY_GITHUB_REPOSITORIES.has(repository) ? DEFAULT_SETTINGS.githubRepo : repository;
+  return LEGACY_GITHUB_REPOSITORIES.has(repository.toLowerCase())
+    ? DEFAULT_SETTINGS.githubRepo
+    : repository;
 }
 
 export function normalizeSettings(value: unknown, safeMode = false): AppSettings {

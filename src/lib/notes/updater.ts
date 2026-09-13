@@ -1,4 +1,9 @@
-import { isDesktopRuntime } from "./desktop-db";
+const CURRENT_UPDATE_REPOSITORY = "mnhtis1/notes";
+const LEGACY_UPDATE_REPOSITORY = "s7jvgkyp54-create/mtrii-notes";
+
+function isDesktopRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
 
 export type UpdateCheckResult = {
   updateAvailable: boolean;
@@ -31,8 +36,14 @@ export function parseRepoSlug(input: string): string | null {
 }
 
 export function compareSemver(v1: string, v2: string): number {
-  const p1 = cleanVersion(v1).split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
-  const p2 = cleanVersion(v2).split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
+  const p1 = cleanVersion(v1)
+    .split("-")[0]
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
+  const p2 = cleanVersion(v2)
+    .split("-")[0]
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
   const len = Math.max(p1.length, p2.length);
   for (let i = 0; i < len; i++) {
     const a = p1[i] ?? 0;
@@ -56,11 +67,30 @@ export async function checkForGithubUpdates(
   }
 
   try {
-    const res = await fetch(`https://api.github.com/repos/${slug}/releases/latest`, {
+    let releaseRepository = slug;
+    let res = await fetch(`https://api.github.com/repos/${releaseRepository}/releases/latest`, {
       headers: {
         Accept: "application/vnd.github.v3+json",
       },
     });
+
+    // The original public repository remains a read-only transition bridge.
+    // Existing installations can still discover a release without storing
+    // credentials in the app if the current release endpoint is unavailable.
+    if (res.status === 404 && slug.toLowerCase() === CURRENT_UPDATE_REPOSITORY) {
+      const legacyResponse = await fetch(
+        `https://api.github.com/repos/${LEGACY_UPDATE_REPOSITORY}/releases/latest`,
+        {
+          headers: {
+            Accept: "application/vnd.github.v3+json",
+          },
+        },
+      );
+      if (legacyResponse.ok) {
+        res = legacyResponse;
+        releaseRepository = LEGACY_UPDATE_REPOSITORY;
+      }
+    }
 
     if (res.status === 404) {
       return {
@@ -89,9 +119,9 @@ export async function checkForGithubUpdates(
     let assetSize: number | null = null;
 
     if (Array.isArray(data.assets) && data.assets.length > 0) {
-      const exeAsset =
-        data.assets.find((a: { name: string }) => a.name?.toLowerCase().endsWith(".exe")) ||
-        data.assets[0];
+      const exeAsset = data.assets.find((a: { name: string }) =>
+        a.name?.toLowerCase().endsWith(".exe"),
+      );
       if (exeAsset) {
         downloadUrl = exeAsset.browser_download_url || null;
         assetName = exeAsset.name || null;
@@ -108,7 +138,7 @@ export async function checkForGithubUpdates(
         releaseTitle: data.name || latestTag,
         releaseNotes: data.body || "Không có ghi chú phát hành.",
         publishedAt: data.published_at || new Date().toISOString(),
-        releaseUrl: data.html_url || `https://github.com/${slug}/releases`,
+        releaseUrl: data.html_url || `https://github.com/${releaseRepository}/releases`,
         downloadUrl,
         assetName,
         assetSize,
