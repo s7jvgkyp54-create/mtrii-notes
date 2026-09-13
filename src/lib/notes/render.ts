@@ -235,11 +235,17 @@ export function drawText(
   
   ctx.font = `${fontStyle} ${fontWeight} ${t.fontSize}px "${fontFamily}", "Segoe UI", sans-serif`;
   ctx.textAlign = t.align;
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "alphabetic";
   
   const lines = wrapCanvasText(ctx, t.text, t.w);
   const lh = t.fontSize * (t.lineHeight ?? 1.4);
   const totalHeight = Math.max(t.h, lines.length * lh);
+  // CSS centers the font's ascent/descent inside each line box. Use the same
+  // baseline so the text does not jump vertically when the editor closes.
+  const metrics = ctx.measureText("Mg");
+  const ascent = metrics.fontBoundingBoxAscent ?? t.fontSize * 0.8;
+  const descent = metrics.fontBoundingBoxDescent ?? t.fontSize * 0.2;
+  const baseline = (lh - ascent - descent) / 2 + ascent;
 
   // Vẽ nền (nếu có)
   if (t.backgroundColor) {
@@ -255,7 +261,7 @@ export function drawText(
   const x = t.align === "center" ? t.x + t.w / 2 : t.align === "right" ? t.x + t.w : t.x;
   
   lines.forEach((line, i) => {
-    const lineY = t.y + i * lh;
+    const lineY = t.y + i * lh + baseline;
     ctx.fillText(line, x, lineY);
     
     // Xử lý gạch chân
@@ -268,7 +274,7 @@ export function drawText(
         lineX = x - textMetrics.width;
       }
       
-      const underlineY = lineY + t.fontSize * 1.1;
+      const underlineY = lineY + t.fontSize * 0.1;
       const underlineThickness = Math.max(1, t.fontSize * 0.05);
       
       ctx.save();
@@ -297,22 +303,28 @@ export function wrapCanvasText(
   const width = Math.max(1, maxWidth);
   const lines: string[] = [];
 
-  for (const paragraph of text.split("\n")) {
+  for (const paragraph of text.replace(/\r\n?/g, "\n").split("\n")) {
     if (!paragraph) {
       lines.push("");
       continue;
     }
 
     let line = "";
-    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
-      const candidate = line ? `${line} ${word}` : word;
+    for (const word of paragraph.match(/\s+|\S+/gu) ?? []) {
+      if (/^\s+$/u.test(word)) {
+        // Preserve indentation and intentional repeated spaces, matching
+        // textarea's pre-wrap. Trailing whitespace hangs at a soft line break.
+        line += word.replace(/\t/g, "    ");
+        continue;
+      }
+      const candidate = line + word;
       if (ctx.measureText(candidate).width <= width) {
         line = candidate;
         continue;
       }
 
       if (line) {
-        lines.push(line);
+        lines.push(line.trimEnd());
         line = "";
       }
 
@@ -322,7 +334,7 @@ export function wrapCanvasText(
       }
 
       let chunk = "";
-      for (const character of Array.from(word)) {
+      for (const character of splitTextGraphemes(word)) {
         const next = chunk + character;
         if (chunk && ctx.measureText(next).width > width) {
           lines.push(chunk);
@@ -333,10 +345,21 @@ export function wrapCanvasText(
       }
       line = chunk;
     }
-    if (line) lines.push(line);
+    if (line) lines.push(line.trimEnd());
   }
 
   return lines.length ? lines : [""];
+}
+
+let graphemeSegmenter: Intl.Segmenter | null = null;
+
+function splitTextGraphemes(text: string): string[] {
+  if (typeof Intl.Segmenter === "function") {
+    graphemeSegmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
+  }
+  // Older embedded webviews still keep combining Vietnamese marks together.
+  return text.match(/\P{Mark}\p{Mark}*|\p{Mark}+/gu) ?? [];
 }
 
 export function drawLasso(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {

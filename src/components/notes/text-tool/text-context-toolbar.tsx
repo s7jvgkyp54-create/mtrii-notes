@@ -1,5 +1,7 @@
-import React from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import type { TextObject } from "@/lib/notes/types";
+import { displaySize, pageBBoxToDisplay } from "@/lib/notes/geometry";
+import type { PageRecord } from "@/lib/notes/types";
 import { Button } from "@/components/ui/button";
 import { Popover } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
@@ -11,6 +13,7 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
+  Copy,
   Trash2,
   Edit2,
 } from "lucide-react";
@@ -25,6 +28,7 @@ interface TextContextToolbarProps {
   onUpdate: (patch: Partial<TextObject>) => void;
   onDelete: () => void;
   onEdit: () => void;
+  onCopy: () => void;
 }
 
 export function TextContextToolbar({
@@ -36,40 +40,51 @@ export function TextContextToolbar({
   onUpdate,
   onDelete,
   onEdit,
+  onCopy,
 }: TextContextToolbarProps) {
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState(46);
+  useLayoutEffect(() => {
+    const element = toolbarRef.current;
+    if (!element) return;
+    const updateHeight = () => setToolbarHeight(element.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const pageGeometry = { width: pageWidth, height: pageHeight, rotation } as PageRecord;
+  const display = displaySize(pageGeometry);
+  const bounds = pageBBoxToDisplay(object, pageGeometry);
   const wrapperStyle: React.CSSProperties = {
     position: "absolute",
     top: 0,
     left: 0,
-    width: pageWidth * zoom,
-    height: pageHeight * zoom,
-    transformOrigin: "top left",
-    transform:
-      rotation === 90
-        ? "rotate(90deg) translateY(-100%)"
-        : rotation === 180
-          ? "rotate(180deg) translate(-100%, -100%)"
-          : rotation === 270
-            ? "rotate(270deg) translateX(-100%)"
-            : "none",
+    width: display.w * zoom,
+    height: display.h * zoom,
     pointerEvents: "none",
     zIndex: 50,
   };
 
-  const topPx = object.y * zoom;
-  const leftPx = object.x * zoom;
-  // Position above the object, or below if too close to top
-  const toolbarTop = topPx > 60 ? topPx - 50 : topPx + object.h * zoom + 10;
+  const topPx = bounds.y * zoom;
+  const toolbarWidth = Math.min(460, Math.max(1, display.w * zoom - 16));
+  const leftPx = Math.max(8, Math.min(bounds.x * zoom, display.w * zoom - toolbarWidth - 8));
+  // A narrow page wraps the controls into rows; reserve their actual height.
+  const preferredTop = topPx > toolbarHeight + 8
+    ? topPx - toolbarHeight - 8
+    : topPx + bounds.h * zoom + 8;
+  const toolbarTop = Math.max(8, Math.min(preferredTop, display.h * zoom - toolbarHeight - 8));
 
   return (
     <div style={wrapperStyle}>
       <div
+        ref={toolbarRef}
         className="absolute flex items-center gap-1 rounded-lg border bg-surface/90 p-1.5 shadow-md backdrop-blur-sm pointer-events-auto"
         style={{
           left: leftPx,
           top: toolbarTop,
-          // Prevent it from going off the right edge
-          maxWidth: Math.min(600, pageWidth * zoom - leftPx),
+          width: "max-content",
+          maxWidth: toolbarWidth,
           flexWrap: "wrap",
         }}
         onPointerDown={(e) => e.stopPropagation()}
@@ -82,6 +97,16 @@ export function TextContextToolbar({
           title="Sửa chữ"
         >
           <Edit2 className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          onClick={onCopy}
+          title="Sao chép"
+          aria-label="Sao chép"
+        >
+          <Copy className="size-4" />
         </Button>
         
         <div className="mx-1 h-5 w-px bg-border" />
@@ -121,6 +146,7 @@ export function TextContextToolbar({
           size="icon"
           className={cn("size-8", object.align === "left" && "bg-overlay text-fg")}
           onClick={() => onUpdate({ align: "left" })}
+          title="Căn trái"
         >
           <AlignLeft className="size-4" />
         </Button>
@@ -129,6 +155,7 @@ export function TextContextToolbar({
           size="icon"
           className={cn("size-8", object.align === "center" && "bg-overlay text-fg")}
           onClick={() => onUpdate({ align: "center" })}
+          title="Căn giữa"
         >
           <AlignCenter className="size-4" />
         </Button>
@@ -137,6 +164,7 @@ export function TextContextToolbar({
           size="icon"
           className={cn("size-8", object.align === "right" && "bg-overlay text-fg")}
           onClick={() => onUpdate({ align: "right" })}
+          title="Căn phải"
         >
           <AlignRight className="size-4" />
         </Button>
@@ -195,7 +223,7 @@ export function TextContextToolbar({
                      object.backgroundColor === c ? "border-fg" : "border-transparent",
                    )}
                    style={{ backgroundColor: c }}
-                   onClick={() => onUpdate({ backgroundColor: c, backgroundOpacity: object.backgroundOpacity || 1 })}
+                   onClick={() => onUpdate({ backgroundColor: c, backgroundOpacity: object.backgroundOpacity ?? 1 })}
                  />
                ))}
              </div>

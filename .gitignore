@@ -23,3 +23,10 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local QA and packaging output
+/.grok/qa-*.mjs
+/.native-autosave-qa/
+/.release-tools/
+/artifacts/win7/
+/screenshots/

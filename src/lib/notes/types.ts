@@ -47,16 +47,7 @@ export interface NoteVersion {
 export type PenKind = "ballpoint" | "fountain" | "pencil" | "highlighter";
 
 export type ToolName =
-  | PenKind
-  | "eraser"
-  | "lasso"
-  | "text"
-  | "image"
-  | "line"
-  | "arrow"
-  | "rect"
-  | "ellipse"
-  | "hand";
+  PenKind | "eraser" | "lasso" | "text" | "image" | "line" | "arrow" | "rect" | "ellipse" | "hand";
 
 export interface PaperStyle {
   pattern: PaperPattern;
@@ -285,7 +276,8 @@ export const DEFAULT_PAPER: PaperStyle = {
   lineColor: "#D6D3CD",
 };
 
-export const GOOGLE_CLIENT_ID = "910521650850-" + "g8dofvgn2a94mfk3v0i6c0n239lugdvt.apps.googleusercontent.com";
+export const GOOGLE_CLIENT_ID =
+  "910521650850-" + "g8dofvgn2a94mfk3v0i6c0n239lugdvt.apps.googleusercontent.com";
 export const GOOGLE_CLIENT_SECRET = "GOCSPX-" + "e_MIUpuTeqNI6WSBxm6iyK2JFTms";
 export const GOOGLE_API_KEY = "AQ." + "Ab8RN6K9o1CAXgAkh85yjWicdoHugz2PPFkmZdYnT3E1qA8pFw";
 
@@ -314,7 +306,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   googleDriveClientId: "",
   googleDriveClientSecret: "",
   googleDriveAccessToken: null,
-  githubRepo: "s7jvgkyp54-create/mtrii-notes",
+  githubRepo: "mnhtis/notes",
   lastUpdateCheckAt: null,
   openTabIds: [],
   pageMode: "continuous",
@@ -327,7 +319,6 @@ export function pageDimensions(
   const s = PAGE_SIZES[size];
   return orientation === "landscape" ? { width: s.h, height: s.w } : { width: s.w, height: s.h };
 }
-
 
 export interface Tombstone {
   id: string;

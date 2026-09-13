@@ -1,6 +1,5 @@
 import React from "react";
 import type { TextObject } from "@/lib/notes/types";
-import { cn } from "@/lib/utils";
 
 interface TextSelectionOverlayProps {
   object: TextObject;
@@ -9,7 +8,6 @@ interface TextSelectionOverlayProps {
   pageWidth: number;
   pageHeight: number;
   onResizeStart: (event: React.PointerEvent, handle: "l" | "r") => void;
-  onEdit: () => void;
 }
 
 export function TextSelectionOverlay({
@@ -19,7 +17,6 @@ export function TextSelectionOverlay({
   pageWidth,
   pageHeight,
   onResizeStart,
-  onEdit,
 }: TextSelectionOverlayProps) {
   const wrapperStyle: React.CSSProperties = {
     position: "absolute",
@@ -55,21 +52,19 @@ export function TextSelectionOverlay({
   return (
     <div style={wrapperStyle}>
       <div
+        data-text-selection-box={object.id}
         className="absolute border-2 border-accent/70 shadow-sm"
         style={{
           left: object.x * zoom,
           top: object.y * zoom,
           width: object.w * zoom,
           height: object.h * zoom,
-          pointerEvents: "auto",
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onEdit();
+          pointerEvents: "none",
         }}
       >
         {/* Left handle */}
         <div
+          data-resize-handle="l"
           style={{ ...handleStyle, left: -6 }}
           onPointerDown={(e) => {
             e.stopPropagation();
@@ -81,6 +76,7 @@ export function TextSelectionOverlay({
 
         {/* Right handle */}
         <div
+          data-resize-handle="r"
           style={{ ...handleStyle, right: -6 }}
           onPointerDown={(e) => {
             e.stopPropagation();

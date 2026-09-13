@@ -43,11 +43,20 @@ export async function sha256Hex(data: ArrayBuffer | Uint8Array) {
 
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  let anchor: HTMLAnchorElement | null = null;
+  try {
+    anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = "none";
+    document.body.append(anchor);
+    anchor.click();
+  } finally {
+    anchor?.remove();
+    // Some engines begin reading the URL after click() returns. Delayed revoke
+    // is still guaranteed even if element creation or the synthetic click fails.
+    setTimeout(() => URL.revokeObjectURL(url), 4_000);
+  }
 }
 
 export function relativeVi(ts: number) {

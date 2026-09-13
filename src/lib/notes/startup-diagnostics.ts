@@ -1,4 +1,5 @@
 import { startupMonitor } from "./startup";
+import { downloadBlob } from "@/lib/utils";
 
 export interface SystemDiagnostics {
   platform: string;
@@ -56,13 +57,9 @@ export async function exportStartupDiagnostics(error?: Error) {
   if (isDesktopRuntime()) {
     return invokeNative<string>("native_export_diagnostics", { contents });
   }
-  const url = URL.createObjectURL(new Blob([contents], { type: "application/json" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `notes-diagnostic-${new Date().toISOString().replaceAll(":", "-")}.json`;
-  anchor.click();
-  URL.revokeObjectURL(url);
-  return anchor.download;
+  const filename = `notes-diagnostic-${new Date().toISOString().replaceAll(":", "-")}.json`;
+  downloadBlob(new Blob([contents], { type: "application/json" }), filename);
+  return filename;
 }
 
 export async function openBackupFolder() {

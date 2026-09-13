@@ -5,6 +5,7 @@ import type {
   BackupMeta,
   Bookmark,
   CanvasObject,
+  TextObject,
   Folder,
   LibrarySection,
   Notebook,
@@ -22,8 +23,18 @@ import type { BackupPreview } from "./io";
 import * as db from "./db";
 import type { BootStageId } from "./startup";
 import { partitionFolders, partitionNotebooks } from "./validation";
+import { LatestWriteQueue } from "./latest-write-queue";
+import { collectActiveTextDrafts } from "./text-draft-registry";
 
-export type SaveStatus = "saved" | "saving" | "error";
+export type SaveStatus = "dirty" | "saved" | "saving" | "error";
+
+export interface TextDraftUpdate {
+  sessionId: string;
+  notebookId: string;
+  pageId: string;
+  objectId: string;
+  draft: TextObject | null;
+}
 
 export interface ToolState {
   name: ToolName;
@@ -64,8 +75,8 @@ const defaultTool: ToolState = {
 };
 
 interface HistoryBuf {
-  past: { pageId: string; objects: CanvasObject[] }[];
-  future: { pageId: string; objects: CanvasObject[] }[];
+  past: Record<string, CanvasObject[]>[];
+  future: Record<string, CanvasObject[]>[];
 }
 
 interface NotesState {
@@ -101,7 +112,6 @@ interface NotesState {
   currentPageIndex: number;
   zoom: number;
   tool: ToolState;
-  clipboard: CanvasObject[];
   history: Record<string, HistoryBuf>;
   toc: TocItem[];
   pdfSearchHits: { pageIndex: number; text: string }[];
@@ -164,14 +174,26 @@ interface NotesState {
     objects: CanvasObject[],
     undoable?: boolean,
     beforeState?: CanvasObject[],
+    notebookId?: string,
   ) => void;
+  commitObjectPages: (
+    updates: Record<string, CanvasObject[]>,
+    before?: Record<string, CanvasObject[]>,
+    undoable?: boolean,
+    notebookId?: string,
+  ) => void;
+  stageTextDraft: (update: TextDraftUpdate) => void;
   undo: () => void;
   redo: () => void;
   addBookmark: (pageId: string, title: string) => Promise<void>;
   removeBookmark: (id: string) => Promise<void>;
 
   exportPdf: (notebookId: string) => Promise<void>;
-  exportRasterPdf: (notebookId: string, dpi: 150 | 200 | 300, onProgress?: (p: number) => void) => Promise<void>;
+  exportRasterPdf: (
+    notebookId: string,
+    dpi: 150 | 200 | 300,
+    onProgress?: (p: number) => void,
+  ) => Promise<void>;
   exportBackup: (kind: "full" | "notebook", notebookId?: string) => Promise<void>;
   importBackupFile: (
     file: File,
@@ -196,15 +218,20 @@ let hydratePromise: Promise<void> | null = null;
 
 function enqueue(label: string, task: () => Promise<void>) {
   const run = async () => {
-    useNotesStore.setState({ saveStatus: "saving", saveError: null });
+    const objectState = objectSaveQueue.getSnapshot();
+    if (objectState.status === "saved") {
+      useNotesStore.setState({ saveStatus: "saving", saveError: null });
+    }
     try {
       await task();
       const ts = Date.now();
-      useNotesStore.setState({
-        saveStatus: "saved",
-        lastSaveAt: ts,
-        settings: { ...useNotesStore.getState().settings, lastSaveAt: ts },
-      });
+      if (objectSaveQueue.getSnapshot().status === "saved") {
+        useNotesStore.setState({
+          saveStatus: "saved",
+          lastSaveAt: ts,
+          settings: { ...useNotesStore.getState().settings, lastSaveAt: ts },
+        });
+      }
       await db.putSettings(useNotesStore.getState().settings);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -225,36 +252,93 @@ function patchNb(id: string, partial: Partial<Notebook>) {
   if (nb) void enqueue("notebook", () => db.putNotebook(nb));
 }
 
-let objectsSaveTimeout: any = null;
-const pendingSaves = new Map<string, CanvasObject[]>();
+function collectReferencedAssets(
+  candidates: Set<string>,
+  notebook: Notebook,
+  objectsByPage: Record<string, CanvasObject[]>,
+  referenced: Set<string>,
+) {
+  if (notebook.pdfAssetId && candidates.has(notebook.pdfAssetId)) {
+    referenced.add(notebook.pdfAssetId);
+  }
+  for (const objects of Object.values(objectsByPage)) {
+    for (const object of objects) {
+      if (object.type === "image" && candidates.has(object.assetId)) referenced.add(object.assetId);
+    }
+  }
+}
+
+type ObjectWriteInterceptor = (
+  entries: { pageId: string; objects: CanvasObject[] }[],
+  persist: () => Promise<void>,
+) => Promise<void>;
+
+let objectWriteInterceptor: ObjectWriteInterceptor | null = null;
+
+export function setObjectWriteInterceptorForTests(interceptor: ObjectWriteInterceptor | null) {
+  if (!import.meta.env.DEV) throw new Error("Bộ mô phỏng ghi chỉ khả dụng trong bản phát triển.");
+  objectWriteInterceptor = interceptor;
+}
+
+const objectSaveQueue = new LatestWriteQueue<string, CanvasObject[]>({
+  debounceMs: 500,
+  maxWaitMs: 2_000,
+  write: (entries) => {
+    const payload = entries.map(({ key: pageId, value: objects }) => ({ pageId, objects }));
+    const persist = () => db.putObjectsBatch(payload);
+    return objectWriteInterceptor ? objectWriteInterceptor(payload, persist) : persist();
+  },
+  onStatus: (status, error) => {
+    if (status === "dirty") {
+      useNotesStore.setState({ saveStatus: "dirty", saveError: null });
+      return;
+    }
+    if (status === "saving") {
+      useNotesStore.setState({ saveStatus: "saving", saveError: null });
+      return;
+    }
+    if (status === "error") {
+      const detail = error?.message ? ` ${error.message}` : "";
+      useNotesStore.setState({
+        saveStatus: "error",
+        saveError: `Không lưu được nội dung.${detail}`,
+      });
+      console.error("[notes] objects-batch", error);
+      return;
+    }
+    const ts = Date.now();
+    useNotesStore.setState({
+      saveStatus: "saved",
+      saveError: null,
+      lastSaveAt: ts,
+      settings: { ...useNotesStore.getState().settings, lastSaveAt: ts },
+    });
+  },
+});
 
 async function drainPendingObjectSaves(createMirror = false) {
-  if (objectsSaveTimeout) {
-    clearTimeout(objectsSaveTimeout);
-    objectsSaveTimeout = null;
-  }
-  const saves = Array.from(pendingSaves, ([pageId, objects]) => ({ pageId, objects }));
-  pendingSaves.clear();
-  if (saves.length > 0) {
-    await enqueue("objects-batch", () => db.putObjectsBatch(saves));
-  } else {
-    await writeChain;
-  }
+  await objectSaveQueue.flush();
   if (createMirror) await db.flushStorage();
 }
 
 function queueObjectSave(pageId: string, objects: CanvasObject[]) {
-  pendingSaves.set(pageId, objects);
-  if (objectsSaveTimeout) clearTimeout(objectsSaveTimeout);
-  objectsSaveTimeout = setTimeout(() => {
-    objectsSaveTimeout = null;
-    const saves = Array.from(pendingSaves, ([pendingPageId, savedObjects]) => ({
-      pageId: pendingPageId,
-      objects: savedObjects,
-    }));
-    pendingSaves.clear();
-    void enqueue("objects-batch", () => db.putObjectsBatch(saves));
-  }, 500);
+  objectSaveQueue.enqueue(pageId, objects);
+}
+
+export function mergeTextDraft(objects: CanvasObject[], update: TextDraftUpdate) {
+  const index = objects.findIndex((object) => object.id === update.objectId);
+  const keepDraft = Boolean(update.draft?.text.trim());
+  if (!keepDraft) {
+    return index < 0 ? objects : objects.filter((object) => object.id !== update.objectId);
+  }
+  if (!update.draft || update.draft.id !== update.objectId) {
+    throw new Error("Bản nháp chữ không khớp đối tượng đang sửa.");
+  }
+  if (index < 0) return [...objects, update.draft];
+  if (JSON.stringify(objects[index]) === JSON.stringify(update.draft)) return objects;
+  const next = [...objects];
+  next[index] = update.draft;
+  return next;
 }
 
 export const useNotesStore = create<NotesState>((set, get) => ({
@@ -290,7 +374,6 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   currentPageIndex: 0,
   zoom: 1,
   tool: defaultTool,
-  clipboard: [],
   history: {},
   toc: [],
   pdfSearchHits: [],
@@ -386,8 +469,12 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         });
         document.documentElement.classList.toggle("dark", settings.theme === "dark");
         if (!options.safeMode) {
-          void get().refreshStorage().catch(() => undefined);
-          void get().runAutoBackup().catch(() => undefined);
+          void get()
+            .refreshStorage()
+            .catch(() => undefined);
+          void get()
+            .runAutoBackup()
+            .catch(() => undefined);
         }
         try {
           await navigator.storage?.persist?.();
@@ -551,9 +638,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       blob,
       createdAt: Date.now(),
     });
-    const { loadPdfDocument, pdfPageSizes } = await import("./pdf");
-    const doc = await loadPdfDocument(assetId, buf);
-    const sizes = await pdfPageSizes(doc);
+    const { acquirePdfDocument, pdfPageSizes } = await import("./pdf");
+    const documentLease = await acquirePdfDocument(assetId, buf);
+    let sizes: Awaited<ReturnType<typeof pdfPageSizes>>;
+    try {
+      sizes = await pdfPageSizes(documentLease.document);
+    } finally {
+      documentLease.release();
+    }
     const t = Date.now();
     const id = nid();
     const name = file.name.replace(/\.pdf$/i, "");
@@ -661,6 +753,28 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         if (object.type === "image") assetIds.add(object.assetId);
       }
     }
+    const referencedElsewhere = new Set<string>();
+    try {
+      for (const other of get().notebooks) {
+        if (other.id === id || referencedElsewhere.size === assetIds.size) continue;
+        if (other.id === get().activeNotebookId) {
+          const activeObjects = Object.fromEntries(
+            get()
+              .pages.filter((candidate) => candidate.notebookId === other.id)
+              .map((candidate) => [candidate.id, get().objectsByPage[candidate.id] ?? []]),
+          );
+          collectReferencedAssets(assetIds, other, activeObjects, referencedElsewhere);
+        } else {
+          const otherPayload = await db.loadNotebookPayload(other.id);
+          collectReferencedAssets(assetIds, other, otherPayload.objects, referencedElsewhere);
+        }
+      }
+    } catch (error) {
+      // Reference checks fail closed: leaking an unused blob is preferable to
+      // deleting an image that another notebook still displays.
+      for (const assetId of assetIds) referencedElsewhere.add(assetId);
+      console.warn("[notes] Không thể kiểm tra tham chiếu asset trước khi xóa sổ.", error);
+    }
     set({
       notebooks: get().notebooks.filter((x) => x.id !== id),
       settings: {
@@ -673,6 +787,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       for (const p of payload.pages) await db.delPage(p.id);
       for (const bookmark of payload.bookmarks) await db.delBookmark(bookmark.id);
       for (const assetId of assetIds) {
+        if (referencedElsewhere.has(assetId)) continue;
         if (n?.pdfAssetId === assetId) {
           const { evictPdf } = await import("./pdf");
           evictPdf(assetId);
@@ -697,6 +812,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   openNotebook: async (id) => {
+    collectActiveTextDrafts();
     await drainPendingObjectSaves();
     const payload = await db.loadNotebookPayload(id);
     const nb = get().notebooks.find((n) => n.id === id);
@@ -717,9 +833,14 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     patchNb(id, { lastOpenedAt: Date.now() });
     if (nb?.pdfAssetId) {
       try {
-        const { loadStoredPdfDocument, pdfOutline } = await import("./pdf");
-        const doc = await loadStoredPdfDocument(nb.pdfAssetId);
-        const toc = await pdfOutline(doc);
+        const { acquireStoredPdfDocument, pdfOutline } = await import("./pdf");
+        const documentLease = await acquireStoredPdfDocument(nb.pdfAssetId);
+        let toc: Awaited<ReturnType<typeof pdfOutline>>;
+        try {
+          toc = await pdfOutline(documentLease.document);
+        } finally {
+          documentLease.release();
+        }
         set({ toc });
       } catch {
         /* outline optional */
@@ -728,6 +849,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   closeTab: async (id) => {
+    collectActiveTextDrafts();
     await drainPendingObjectSaves();
     const tabs = get().settings.openTabIds.filter((t) => t !== id);
     get().persistSettings({ openTabIds: tabs });
@@ -737,12 +859,38 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   },
 
   flushPendingWrites: async () => {
-    await drainPendingObjectSaves(true);
     const { flushAllDocuments } = await import("@/lib/notes/document-save");
-    await flushAllDocuments();
+    try {
+      let observedWriteChain: Promise<void>;
+      do {
+        observedWriteChain = writeChain;
+        await objectSaveQueue.flushThroughCheckpoint(
+          async () => {
+            await observedWriteChain;
+            await flushAllDocuments();
+            await db.flushStorage();
+          },
+          // Read every live textarea directly. React state may be one render
+          // behind during IME/input teardown.
+          collectActiveTextDrafts,
+        );
+        // A metadata write may have been queued while the storage checkpoint
+        // was in flight. Repeat until both channels are stable together.
+      } while (observedWriteChain !== writeChain);
+    } catch (cause) {
+      if (objectSaveQueue.getSnapshot().status !== "error") {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        set({
+          saveStatus: "error",
+          saveError: `Không thể hoàn tất lưu dữ liệu. ${detail}`,
+        });
+      }
+      throw cause;
+    }
   },
 
   setPageIndex: (index) => {
+    collectActiveTextDrafts();
     set({ currentPageIndex: index });
     const id = get().activeNotebookId;
     if (id) patchNb(id, { lastPageIndex: index });
@@ -813,17 +961,27 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   deletePage: async (pageId) => {
     if (get().pages.length <= 1) return;
     await drainPendingObjectSaves();
+    const nbId = get().activeNotebookId;
     const pages = get()
       .pages.filter((p) => p.id !== pageId)
       .map((p, i) => ({ ...p, index: i }));
     const objectsByPage = { ...get().objectsByPage };
     delete objectsByPage[pageId];
+    const history = { ...get().history };
+    if (nbId && history[nbId]) {
+      // A future Redo must never recreate an object row for a page that was
+      // deleted after an Undo. Drop every transaction touching that page.
+      history[nbId] = {
+        past: history[nbId].past.filter((snapshot) => !(pageId in snapshot)),
+        future: history[nbId].future.filter((snapshot) => !(pageId in snapshot)),
+      };
+    }
     set({
       pages,
       objectsByPage,
+      history,
       currentPageIndex: Math.min(get().currentPageIndex, pages.length - 1),
     });
-    const nbId = get().activeNotebookId;
     if (nbId) patchNb(nbId, { pageCount: pages.length });
     await enqueue("del-page", async () => {
       await db.delPage(pageId);
@@ -867,23 +1025,45 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     });
   },
 
-  commitObjects: (pageId, objects, undoable = true, beforeState) => {
+  commitObjects: (pageId, objects, undoable = true, beforeState, notebookId) => {
+    get().commitObjectPages(
+      { [pageId]: objects },
+      beforeState ? { [pageId]: beforeState } : undefined,
+      undoable,
+      notebookId,
+    );
+  },
+
+  // A move between pages is a single edit. Undo/redo must restore both pages
+  // together, otherwise the image/text remains at its destination as a duplicate.
+  commitObjectPages: (updates, before, undoable = true, notebookId) => {
+    const current = get().objectsByPage;
     if (undoable) {
-      const nbId = get().activeNotebookId ?? "x";
+      const nbId = notebookId ?? get().activeNotebookId ?? "x";
       const hist = get().history[nbId] ?? { past: [], future: [] };
       hist.past = [
         ...hist.past.slice(-49),
-        { pageId, objects: beforeState ?? get().objectsByPage[pageId] ?? [] },
+        Object.fromEntries(
+          Object.keys(updates).map((id) => [id, before?.[id] ?? current[id] ?? []]),
+        ),
       ];
       hist.future = [];
       set({ history: { ...get().history, [nbId]: hist } });
     }
-    set({ objectsByPage: { ...get().objectsByPage, [pageId]: objects } });
-    
-    queueObjectSave(pageId, objects);
+    set({ objectsByPage: { ...current, ...updates } });
 
-    const nbId = get().activeNotebookId;
+    for (const [pageId, objects] of Object.entries(updates)) queueObjectSave(pageId, objects);
+
+    const nbId = notebookId ?? get().activeNotebookId;
     if (nbId) patchNb(nbId, {});
+  },
+
+  stageTextDraft: (update) => {
+    const current = get().objectsByPage[update.pageId] ?? [];
+    const next = mergeTextDraft(current, update);
+    if (next === current) return;
+    set({ objectsByPage: { ...get().objectsByPage, [update.pageId]: next } });
+    queueObjectSave(update.pageId, next);
   },
 
   undo: () => {
@@ -892,14 +1072,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const hist = get().history[nbId];
     if (!hist?.past.length) return;
     const snap = hist.past[hist.past.length - 1]!;
-    const current = get().objectsByPage[snap.pageId] ?? [];
+    const current = Object.fromEntries(
+      Object.keys(snap).map((id) => [id, get().objectsByPage[id] ?? []]),
+    );
     hist.past = hist.past.slice(0, -1);
-    hist.future = [...hist.future, { pageId: snap.pageId, objects: current }];
+    hist.future = [...hist.future, current];
     set({
       history: { ...get().history, [nbId]: hist },
-      objectsByPage: { ...get().objectsByPage, [snap.pageId]: snap.objects },
+      objectsByPage: { ...get().objectsByPage, ...snap },
     });
-    queueObjectSave(snap.pageId, snap.objects);
+    for (const [pageId, objects] of Object.entries(snap)) queueObjectSave(pageId, objects);
   },
 
   redo: () => {
@@ -908,14 +1090,16 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const hist = get().history[nbId];
     if (!hist?.future.length) return;
     const snap = hist.future[hist.future.length - 1]!;
-    const current = get().objectsByPage[snap.pageId] ?? [];
+    const current = Object.fromEntries(
+      Object.keys(snap).map((id) => [id, get().objectsByPage[id] ?? []]),
+    );
     hist.future = hist.future.slice(0, -1);
-    hist.past = [...hist.past, { pageId: snap.pageId, objects: current }];
+    hist.past = [...hist.past, current];
     set({
       history: { ...get().history, [nbId]: hist },
-      objectsByPage: { ...get().objectsByPage, [snap.pageId]: snap.objects },
+      objectsByPage: { ...get().objectsByPage, ...snap },
     });
-    queueObjectSave(snap.pageId, snap.objects);
+    for (const [pageId, objects] of Object.entries(snap)) queueObjectSave(pageId, objects);
   },
 
   addBookmark: async (pageId, title) => {
@@ -944,8 +1128,9 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     const header = new TextDecoder().decode(bytes.slice(0, 5));
     if (header !== "%PDF-") throw new Error("Tệp xuất ra không đúng định dạng PDF (sai header).");
     const footerStr = new TextDecoder().decode(bytes.slice(-200));
-    if (!footerStr.includes("%%EOF")) throw new Error("Tệp xuất ra không đúng định dạng PDF (thiếu EOF).");
-    
+    if (!footerStr.includes("%%EOF"))
+      throw new Error("Tệp xuất ra không đúng định dạng PDF (thiếu EOF).");
+
     const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
     await downloadBlob(blob, `${nb.name}.pdf`);
@@ -956,13 +1141,17 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     if (!nb) throw new Error("Không tìm thấy sổ.");
     const payload = await db.loadNotebookPayload(notebookId);
     const { exportRasterPdf } = await import("./raster-pdf-export");
-    const bytes = await exportRasterPdf({
-      notebook: nb,
-      pages: payload.pages,
-      objects: payload.objects,
-    }, dpi, onProgress);
+    const bytes = await exportRasterPdf(
+      {
+        notebook: nb,
+        pages: payload.pages,
+        objects: payload.objects,
+      },
+      dpi,
+      onProgress,
+    );
     if (bytes.length < 100) throw new Error("Tệp PDF xuất ra quá nhỏ, có thể bị lỗi.");
-    
+
     const blob = new Blob([new Uint8Array(bytes)], { type: "application/pdf" });
     const { downloadBlob } = await import("@/lib/utils");
     await downloadBlob(blob, `${nb.name} (Ảnh).pdf`);
@@ -1061,7 +1250,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
       const keep = s.backupKeep || 7;
       for (const old of autos.slice(keep)) {
         await db.delBackup(old.id);
-        }
+      }
       const list = (await db.listBackups()).map(({ blob: _b, ...rest }) => rest);
       set({ backups: list });
       get().persistSettings({ lastBackupAt: Date.now() });

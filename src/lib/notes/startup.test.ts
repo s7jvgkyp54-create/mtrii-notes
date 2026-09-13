@@ -66,6 +66,13 @@ describe("startup data isolation", () => {
     assert.deepEqual(settings.openTabIds, []);
   });
 
+  it("moves the retired update repository to the current public repository", () => {
+    const settings = normalizeSettings({
+      githubRepo: "s7jvgkyp54-create/mtrii-notes",
+    });
+    assert.equal(settings.githubRepo, "mnhtis/notes");
+  });
+
   it("quarantines malformed folders and notebooks without mutating valid rows", () => {
     const folder = { id: "folder-1", name: "Học tập" };
     const notebook = { id: "note-1", name: "Đại số", cover: { color: "#0f766e" } };

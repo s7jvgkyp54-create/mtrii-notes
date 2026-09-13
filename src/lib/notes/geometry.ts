@@ -32,6 +32,21 @@ export function displayToPage(dx: number, dy: number, page: PageRecord): Pt {
   }
 }
 
+/** Map page coordinates to the display space used by DOM overlays. */
+export function pageToDisplay(x: number, y: number, page: PageRecord): Pt {
+  const { width: w, height: h, rotation } = page;
+  switch (rotation) {
+    case 90:
+      return { x: h - y, y: x };
+    case 180:
+      return { x: w - x, y: h - y };
+    case 270:
+      return { x: y, y: w - x };
+    default:
+      return { x, y };
+  }
+}
+
 export function applyPageRotation(
   ctx: CanvasRenderingContext2D,
   page: PageRecord,
@@ -85,21 +100,50 @@ export interface BBox {
   h: number;
 }
 
+/** Page rotations are quarter turns, so two opposite corners give exact bounds. */
+export function pageBBoxToDisplay(box: BBox, page: PageRecord): BBox {
+  const a = pageToDisplay(box.x, box.y, page);
+  const b = pageToDisplay(box.x + box.w, box.y + box.h, page);
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
+  };
+}
+
 export function objectBBox(o: CanvasObject): BBox {
   if (o.type === "stroke") {
-    const xs = o.points.map((p) => p.x);
-    const ys = o.points.map((p) => p.y);
+    if (!o.points.length) return { x: 0, y: 0, w: 0, h: 0 };
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    // A long pen stroke can exceed the engine's argument limit when spread
+    // into Math.min/Math.max, blanking the page when it is selected.
+    for (const point of o.points) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
     const pad = o.width;
-    const minX = Math.min(...xs) - pad;
-    const minY = Math.min(...ys) - pad;
     return {
-      x: minX,
-      y: minY,
-      w: Math.max(...xs) - minX + pad,
-      h: Math.max(...ys) - minY + pad,
+      x: minX - pad,
+      y: minY - pad,
+      w: maxX - minX + pad * 2,
+      h: maxY - minY + pad * 2,
     };
   }
   if (o.type === "text" || o.type === "image") {
+    if (o.type === "image" && o.rotation) {
+      const angle = (o.rotation * Math.PI) / 180;
+      const cos = Math.abs(Math.cos(angle));
+      const sin = Math.abs(Math.sin(angle));
+      const w = o.w * cos + o.h * sin;
+      const h = o.w * sin + o.h * cos;
+      return { x: o.x + (o.w - w) / 2, y: o.y + (o.h - h) / 2, w, h };
+    }
     return { x: o.x, y: o.y, w: o.w, h: o.h };
   }
   const x = Math.min(o.x1, o.x2);
@@ -114,13 +158,14 @@ export function unionBBox(objects: CanvasObject[]): BBox | null {
     r = -Infinity,
     b = -Infinity;
   for (const o of objects) {
+    if (o.type === "stroke" && !o.points.length) continue;
     const box = objectBBox(o);
     x = Math.min(x, box.x);
     y = Math.min(y, box.y);
     r = Math.max(r, box.x + box.w);
     b = Math.max(b, box.y + box.h);
   }
-  return { x, y, w: r - x, h: b - y };
+  return Number.isFinite(x) ? { x, y, w: r - x, h: b - y } : null;
 }
 
 export function hitTest(o: CanvasObject, p: Pt, slop = 4): boolean {
@@ -128,7 +173,20 @@ export function hitTest(o: CanvasObject, p: Pt, slop = 4): boolean {
     return strokeMinDist(p, o.points) <= o.width / 2 + slop;
   }
   if (o.type === "text" || o.type === "image") {
-    return p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h;
+    let local = p;
+    if (o.type === "image" && o.rotation) {
+      const angle = (-o.rotation * Math.PI) / 180;
+      const cx = o.x + o.w / 2;
+      const cy = o.y + o.h / 2;
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      local = {
+        x: cx + dx * Math.cos(angle) - dy * Math.sin(angle),
+        y: cy + dx * Math.sin(angle) + dy * Math.cos(angle),
+      };
+    }
+    return local.x >= o.x - slop && local.x <= o.x + o.w + slop &&
+      local.y >= o.y - slop && local.y <= o.y + o.h + slop;
   }
   if (o.shape === "line" || o.shape === "arrow") {
     return pointToSeg(p, { x: o.x1, y: o.y1 }, { x: o.x2, y: o.y2 }) <= o.width + slop;
@@ -193,13 +251,23 @@ export function scaleObjects(objects: CanvasObject[], box: BBox, nx: number, ny:
 export function rotateObjects(objects: CanvasObject[], cx: number, cy: number, rad: number) {
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  return objects.map((o) =>
-    mapPoints(o, (x, y) => {
-      const dx = x - cx;
-      const dy = y - cy;
-      return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
-    }),
-  );
+  const rotate = (x: number, y: number) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  };
+  return objects.map((o) => {
+    if (o.type === "image") {
+      const center = rotate(o.x + o.w / 2, o.y + o.h / 2);
+      return {
+        ...o,
+        x: center.x - o.w / 2,
+        y: center.y - o.h / 2,
+        rotation: o.rotation + (rad * 180) / Math.PI,
+      };
+    }
+    return mapPoints(o, rotate);
+  });
 }
 
 function mapPoints(o: CanvasObject, fn: (x: number, y: number) => Pt): CanvasObject {

@@ -3,6 +3,7 @@ import { useNotesStore } from "@/lib/notes/store";
 import { APP_VERSION } from "@/lib/notes/types";
 import type { UpdateCheckResult } from "@/lib/notes/updater";
 import { startupMonitor, type BootSnapshot } from "@/lib/notes/startup";
+import { createCloseGuard } from "@/lib/notes/close-guard";
 import { RecoveryScreen, StartupLoading } from "./startup-ui";
 
 const UpdateDialog = lazy(() =>
@@ -34,7 +35,6 @@ export function AppBoot({ children }: { children: ReactNode }) {
     if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
     let unlistenResize: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
-    let closing = false;
     void Promise.all([
       import("@tauri-apps/api/window"),
       import("@tauri-apps/api/webviewWindow"),
@@ -65,23 +65,16 @@ export function AppBoot({ children }: { children: ReactNode }) {
             }
           }
         });
-        const close = current.onCloseRequested(async (event) => {
-          if (closing) return;
-          event.preventDefault();
-          closing = true;
-          try {
-            await useNotesStore.getState().flushPendingWrites();
-          } catch (error) {
-            startupMonitor.warn(`Không thể hoàn tất lưu dữ liệu trước khi đóng: ${String(error)}`);
-          } finally {
-            try {
-              await current.destroy();
-            } catch (error) {
-              closing = false;
-              startupMonitor.warn(`Không thể đóng cửa sổ ứng dụng: ${String(error)}`);
-            }
-          }
-        });
+        const close = current.onCloseRequested(
+          createCloseGuard({
+            flush: () => useNotesStore.getState().flushPendingWrites(),
+            destroy: () => current.destroy(),
+            onError: (error) =>
+              startupMonitor.warn(
+                `Không thể hoàn tất lưu dữ liệu trước khi đóng. Cửa sổ vẫn mở để bạn thử lại: ${String(error)}`,
+              ),
+          }),
+        );
         return Promise.all([resize, close]);
       })
       .then((stops) => {
@@ -92,6 +85,27 @@ export function AppBoot({ children }: { children: ReactNode }) {
     return () => {
       unlistenResize?.();
       unlistenClose?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const flushInBackground = () => {
+      void useNotesStore
+        .getState()
+        .flushPendingWrites()
+        .catch((error) =>
+          startupMonitor.warn(`Không thể tự lưu khi ứng dụng chuyển nền: ${String(error)}`),
+        );
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushInBackground();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", flushInBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", flushInBackground);
     };
   }, []);
 

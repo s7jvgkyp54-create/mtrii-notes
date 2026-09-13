@@ -1,75 +1,158 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { TextObject } from "@/lib/notes/types";
-import { cn } from "@/lib/utils";
+import { registerActiveTextDraft } from "@/lib/notes/text-draft-registry";
+import { measureTextHeight } from "./text-layout";
 
 interface TextEditorOverlayProps {
+  sessionId: string;
+  notebookId: string;
+  pageId: string;
   editing: TextObject;
   zoom: number;
   pageWidth: number;
   pageHeight: number;
   rotation: number;
-  onCommit: (text: string, w: number, h: number) => void;
+  onDraftChange: (draft: TextObject) => void;
+  onCommit: (draft: TextObject) => void;
   onCancel: () => void;
 }
 
 export function TextEditorOverlay({
+  sessionId,
+  notebookId,
+  pageId,
   editing,
   zoom,
   pageWidth,
   pageHeight,
   rotation,
+  onDraftChange,
   onCommit,
   onCancel,
 }: TextEditorOverlayProps) {
   const [text, setText] = useState(editing.text);
-  const [isComposing, setIsComposing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const lastCommitRef = useRef(false);
-  const mountedTimeRef = useRef(Date.now());
+  const composingRef = useRef(false);
+  const pendingBlurRef = useRef(false);
+  const settledRef = useRef(false);
+  const lifecycleRef = useRef(0);
+  const latestRef = useRef({ editing, text, onDraftChange, onCommit, onCancel });
+  latestRef.current = { editing, text, onDraftChange, onCommit, onCancel };
 
-  const callbacksRef = useRef({ onCommit, onCancel });
-  useEffect(() => {
-    callbacksRef.current = { onCommit, onCancel };
-  }, [onCommit, onCancel]);
+  function buildDraft(value: string) {
+    const latest = latestRef.current.editing;
+    const width = Math.max(1, latest.w);
+    return {
+      ...latest,
+      text: value,
+      w: width,
+      h: measureTextHeight(
+        value,
+        width,
+        latest.fontSize,
+        latest.fontFamily,
+        latest.fontWeight,
+        latest.fontStyle,
+        latest.lineHeight,
+      ),
+    } satisfies TextObject;
+  }
 
-  // Auto-resize
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.max(editing.fontSize * 1.5 * zoom, el.scrollHeight)}px`;
-  }, [text, editing.fontSize, zoom]);
+  function publish(value: string) {
+    const draft = buildDraft(value);
+    latestRef.current.onDraftChange(draft);
+    return draft;
+  }
+  const publishRef = useRef(publish);
+  publishRef.current = publish;
 
-  // Flush on unmount if there's uncommitted text
-  useEffect(() => {
-    return () => {
-      if (lastCommitRef.current) return;
-      const el = textareaRef.current;
-      if (el) {
-        const final = el.value.trimEnd();
-        if (final) {
-          const w = Math.max(120, el.offsetWidth / zoom);
-          const h = Math.max(editing.fontSize * 1.5, el.scrollHeight / zoom);
-          callbacksRef.current.onCommit(final, w, h);
-        } else if (!editing.text) {
-          callbacksRef.current.onCancel();
-        }
-      }
-    };
-  }, [editing.text, zoom]);
-
-  const handleCommit = (el: HTMLTextAreaElement) => {
-    if (isComposing) return;
-    const final = el.value.trimEnd();
-    lastCommitRef.current = true;
-    if (final) {
-      const w = Math.max(120, el.offsetWidth / zoom);
-      const h = Math.max(editing.fontSize * 1.5, el.scrollHeight / zoom);
-      onCommit(final, w, h);
-    } else {
-      onCancel();
+  function finish(value: string) {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    const latest = latestRef.current;
+    const draft = publishRef.current(value);
+    // Match the existing editor contract: finishing an empty value cancels
+    // the edit. The parent restores an existing object's session baseline,
+    // while a brand-new empty object simply remains absent.
+    if (!value.trim()) {
+      latest.onCancel();
+      return;
     }
-  };
+    latest.onCommit(draft);
+  }
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+
+  const height = measureTextHeight(
+    text,
+    editing.w,
+    editing.fontSize,
+    editing.fontFamily,
+    editing.fontWeight,
+    editing.fontStyle,
+    editing.lineHeight,
+  );
+
+  // Match the saved canvas text box without zoom-dependent padding or borders.
+  // Resize before paint so typing another line never flashes a scrollbar.
+  useLayoutEffect(() => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = `${height * zoom}px`;
+    if (element.scrollHeight > element.clientHeight) {
+      element.style.height = `${element.scrollHeight}px`;
+    }
+  }, [height, text, editing.w, editing.fontFamily, editing.fontWeight, editing.fontStyle, zoom]);
+
+  useLayoutEffect(() => {
+    const lifecycle = ++lifecycleRef.current;
+    const element = textareaRef.current;
+    const unregister = registerActiveTextDraft(
+      { sessionId, notebookId, pageId, objectId: editing.id },
+      () => {
+        if (!settledRef.current) {
+          publishRef.current(element?.value ?? latestRef.current.text);
+        }
+      },
+    );
+    element?.focus({ preventScroll: true });
+    if (element) element.setSelectionRange(element.value.length, element.value.length);
+    return () => {
+      // The DOM ref is cleared before passive cleanup. Capture the live value
+      // now, then ignore React StrictMode's simulated unmount/remount cycle.
+      const value = element?.value ?? latestRef.current.text;
+      unregister();
+      queueMicrotask(() => {
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- reading the live counter is how StrictMode's simulated remount is distinguished from a real unmount
+        if (lifecycleRef.current === lifecycle) finishRef.current(value);
+      });
+    };
+  }, [editing.id, notebookId, pageId, sessionId]);
+
+  const formattingSignature = [
+    editing.x,
+    editing.y,
+    editing.w,
+    editing.fontSize,
+    editing.fontFamily,
+    editing.fontWeight,
+    editing.fontStyle,
+    editing.textDecoration,
+    editing.align,
+    editing.color,
+    editing.backgroundColor,
+    editing.backgroundOpacity,
+    editing.lineHeight,
+    editing.rotation,
+  ].join("|");
+  const lastFormattingRef = useRef(formattingSignature);
+  useLayoutEffect(() => {
+    if (lastFormattingRef.current === formattingSignature) return;
+    lastFormattingRef.current = formattingSignature;
+    if (!settledRef.current) {
+      publishRef.current(textareaRef.current?.value ?? latestRef.current.text);
+    }
+  }, [formattingSignature]);
 
   const wrapperStyle: React.CSSProperties = {
     position: "absolute",
@@ -90,68 +173,84 @@ export function TextEditorOverlay({
     zIndex: 50,
   };
 
-  const bgColor = editing.backgroundColor
-    ? `${editing.backgroundColor}${Math.round((editing.backgroundOpacity ?? 1) * 255)
-        .toString(16)
-        .padStart(2, "0")}`
-    : "transparent";
-
   return (
     <div style={wrapperStyle}>
+      {editing.backgroundColor ? (
+        <div
+          className="absolute"
+          style={{
+            left: editing.x * zoom,
+            top: editing.y * zoom,
+            width: Math.max(1, editing.w) * zoom,
+            height: height * zoom,
+            backgroundColor: editing.backgroundColor,
+            opacity: Math.max(0, Math.min(1, editing.backgroundOpacity ?? 1)),
+          }}
+        />
+      ) : null}
       <textarea
         ref={textareaRef}
-        autoFocus
-        rows={2}
+        data-notes-text-editor="true"
+        rows={1}
+        aria-label="Nội dung hộp chữ"
         placeholder="Nhập nội dung…"
-        className={cn(
-          "absolute resize overflow-auto rounded-md border-2 border-accent bg-surface-2/95 p-2 text-fg outline-none shadow-lg",
-          "pointer-events-auto",
-        )}
+        className="absolute pointer-events-auto resize-none overflow-hidden rounded-none border-0 bg-transparent p-0 text-fg outline outline-2 outline-accent outline-offset-2"
         style={{
           left: editing.x * zoom,
           top: editing.y * zoom,
-          width: Math.max(120, editing.w * zoom),
-          minHeight: editing.fontSize * 1.5 * zoom,
+          width: Math.max(1, editing.w) * zoom,
+          minHeight: editing.fontSize * (editing.lineHeight ?? 1.4) * zoom,
           fontSize: editing.fontSize * zoom,
           color: editing.color,
-          fontFamily: `"${editing.fontFamily || "Be Vietnam Pro"}", sans-serif`,
+          fontFamily: `"${editing.fontFamily || "Be Vietnam Pro"}", "Segoe UI", sans-serif`,
           fontWeight: editing.fontWeight || "normal",
           fontStyle: editing.fontStyle || "normal",
           textDecoration: editing.textDecoration || "none",
           textAlign: editing.align || "left",
-          backgroundColor: bgColor,
           lineHeight: editing.lineHeight ?? 1.4,
+          whiteSpace: "pre-wrap",
+          overflowWrap: "break-word",
+          tabSize: 4,
         }}
         value={text}
         onPointerDown={(event) => event.stopPropagation()}
-        onChange={(e) => setText(e.target.value)}
-        onCompositionStart={() => setIsComposing(true)}
-        onCompositionEnd={(e) => {
-          setIsComposing(false);
-          // Composition end might also update text if we rely on synthetic events
-          setText(e.currentTarget.value);
+        onChange={(event) => {
+          const value = event.target.value;
+          setText(value);
+          publishRef.current(value);
+        }}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={(event) => {
+          composingRef.current = false;
+          const element = event.currentTarget;
+          setText(element.value);
+          publishRef.current(element.value);
+          if (pendingBlurRef.current) {
+            pendingBlurRef.current = false;
+            queueMicrotask(() => finishRef.current(element.value));
+          }
         }}
         onKeyDown={(event) => {
+          if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "Escape") {
             event.preventDefault();
-            lastCommitRef.current = true;
-            if (editing.text) {
-              onCommit(editing.text, editing.w, editing.h);
-            } else {
-              onCancel();
-            }
+            event.stopPropagation();
+            settledRef.current = true;
+            onCancel();
           } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
             event.preventDefault();
-            handleCommit(event.currentTarget);
+            event.stopPropagation();
+            finish(event.currentTarget.value);
           }
         }}
-        onBlur={(e) => {
-          if (Date.now() - mountedTimeRef.current < 200) {
-            // Browser fired mousedown/blur sequence immediately after creation. Force focus back.
-            e.currentTarget.focus();
+        onBlur={(event) => {
+          if (composingRef.current) {
+            pendingBlurRef.current = true;
             return;
           }
-          handleCommit(e.currentTarget);
+          finish(event.currentTarget.value);
         }}
       />
     </div>

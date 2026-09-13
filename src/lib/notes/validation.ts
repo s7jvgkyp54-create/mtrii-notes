@@ -13,6 +13,13 @@ function stringValue(value: unknown, fallback: string) {
   return typeof value === "string" ? value : fallback;
 }
 
+const LEGACY_GITHUB_REPOSITORIES = new Set(["s7jvgkyp54-create/mtrii-notes"]);
+
+function githubRepositoryValue(value: unknown) {
+  const repository = stringValue(value, DEFAULT_SETTINGS.githubRepo).trim();
+  return LEGACY_GITHUB_REPOSITORIES.has(repository) ? DEFAULT_SETTINGS.githubRepo : repository;
+}
+
 export function normalizeSettings(value: unknown, safeMode = false): AppSettings {
   if (safeMode || !value || typeof value !== "object" || Array.isArray(value)) {
     return structuredClone(DEFAULT_SETTINGS);
@@ -52,10 +59,7 @@ export function normalizeSettings(value: unknown, safeMode = false): AppSettings
         pomodoro.notificationsEnabled,
         DEFAULT_SETTINGS.pomodoro.notificationsEnabled,
       ),
-      showMiniClock: booleanValue(
-        pomodoro.showMiniClock,
-        DEFAULT_SETTINGS.pomodoro.showMiniClock,
-      ),
+      showMiniClock: booleanValue(pomodoro.showMiniClock, DEFAULT_SETTINGS.pomodoro.showMiniClock),
       pinFloatingWindow: booleanValue(
         pomodoro.pinFloatingWindow,
         DEFAULT_SETTINGS.pomodoro.pinFloatingWindow,
@@ -64,10 +68,15 @@ export function normalizeSettings(value: unknown, safeMode = false): AppSettings
     theme: raw.theme === "dark" ? "dark" : "light",
     penOnly: booleanValue(raw.penOnly, DEFAULT_SETTINGS.penOnly),
     favoriteColors: Array.isArray(raw.favoriteColors)
-      ? raw.favoriteColors.filter((color): color is string => typeof color === "string").slice(0, 24)
+      ? raw.favoriteColors
+          .filter((color): color is string => typeof color === "string")
+          .slice(0, 24)
       : [...DEFAULT_SETTINGS.favoriteColors],
     autoBackup: booleanValue(raw.autoBackup, DEFAULT_SETTINGS.autoBackup),
-    backupKeep: Math.min(50, Math.max(1, finiteNumber(raw.backupKeep, DEFAULT_SETTINGS.backupKeep))),
+    backupKeep: Math.min(
+      50,
+      Math.max(1, finiteNumber(raw.backupKeep, DEFAULT_SETTINGS.backupKeep)),
+    ),
     lastBackupAt: raw.lastBackupAt === null ? null : finiteNumber(raw.lastBackupAt, 0) || null,
     lastSaveAt: raw.lastSaveAt === null ? null : finiteNumber(raw.lastSaveAt, 0) || null,
     autoCheckUpdates: booleanValue(raw.autoCheckUpdates, DEFAULT_SETTINGS.autoCheckUpdates),
@@ -79,7 +88,7 @@ export function normalizeSettings(value: unknown, safeMode = false): AppSettings
         : typeof raw.googleDriveAccessToken === "string"
           ? raw.googleDriveAccessToken
           : null,
-    githubRepo: stringValue(raw.githubRepo, DEFAULT_SETTINGS.githubRepo),
+    githubRepo: githubRepositoryValue(raw.githubRepo),
     lastUpdateCheckAt:
       raw.lastUpdateCheckAt === null ? null : finiteNumber(raw.lastUpdateCheckAt, 0) || null,
     openTabIds: Array.isArray(raw.openTabIds)

@@ -50,7 +50,7 @@ import {
 } from "@/lib/notes/types";
 import { useNotesStore } from "@/lib/notes/store";
 import { displaySize } from "@/lib/notes/geometry";
-import { loadStoredPdfDocument, searchPdfText } from "@/lib/notes/pdf";
+import { acquireStoredPdfDocument, searchPdfText } from "@/lib/notes/pdf";
 import { useNotesNavigate } from "@/lib/notes/navigation";
 import { OPEN_IMAGE_PICKER_EVENT, PageSurface } from "./page-surface";
 import { PageThumbnail } from "./page-thumbnail";
@@ -93,6 +93,19 @@ export function EditorView({ notebookId }: { notebookId: string }) {
       void useNotesStore.getState().openNotebook(notebookId);
     }
   }, [notebookId]);
+
+  useEffect(
+    () => () => {
+      // PageSurface cleanups release their leases in the same commit. Trim on
+      // the next task so an old notebook cannot occupy the warm cache forever.
+      window.setTimeout(() => {
+        void import("@/lib/notes/image-cache").then(({ trimUnusedAssetImages }) =>
+          trimUnusedAssetImages(true),
+        );
+      }, 0);
+    },
+    [notebookId],
+  );
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -162,16 +175,29 @@ export function EditorView({ notebookId }: { notebookId: string }) {
     return () => cancelAnimationFrame(frame);
   }, [pageIndex, ready]);
 
+  const flushThenNavigate = async (destination: Parameters<typeof navigate>[0]) => {
+    try {
+      await useNotesStore.getState().flushPendingWrites();
+      await navigate(destination);
+    } catch {
+      // The store keeps the draft and exposes a retryable error in the header.
+    }
+  };
+
   const handleCloseTab = async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const remaining = tabs.filter((t) => t !== id);
-    await useNotesStore.getState().closeTab(id);
+    try {
+      await useNotesStore.getState().closeTab(id);
+    } catch {
+      return;
+    }
     if (id === notebookId) {
       if (remaining.length > 0) {
         const nextId = remaining[remaining.length - 1];
-        void navigate({ to: "/notebook/$id", params: { id: nextId } });
+        await navigate({ to: "/notebook/$id", params: { id: nextId } });
       } else {
-        void navigate({ to: "/" });
+        await navigate({ to: "/" });
       }
     }
   };
@@ -199,7 +225,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             onClick={() => {
               const store = useNotesStore.getState();
               store.rememberView();
-              void store.flushPendingWrites().then(() => navigate({ to: "/" }));
+              void flushThenNavigate({ to: "/" });
             }}
           >
             <ArrowLeft /> Thư viện
@@ -212,7 +238,7 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               return (
                 <div
                   key={id}
-                  onClick={() => void navigate({ to: "/notebook/$id", params: { id } })}
+                  onClick={() => void flushThenNavigate({ to: "/notebook/$id", params: { id } })}
                   onAuxClick={(e) => {
                     if (e.button === 1) handleCloseTab(id, e);
                   }}
@@ -240,18 +266,34 @@ export function EditorView({ notebookId }: { notebookId: string }) {
             })}
           </div>
           <p className="truncate text-sm font-semibold md:hidden">{notebook.name}</p>
-          <span
-            className={cn(
-              "ml-auto text-xs tabular-nums",
-              saveStatus === "saving" && "text-muted",
-              saveStatus === "saved" && "text-success",
-              saveStatus === "error" && "text-danger",
-            )}
-          >
-            {saveStatus === "saving" && "Đang lưu"}
-            {saveStatus === "saved" && "Đã lưu"}
-            {saveStatus === "error" && (saveError ?? "Lỗi lưu")}
-          </span>
+          {saveStatus === "error" ? (
+            <button
+              type="button"
+              className="ml-auto max-w-44 truncate text-xs font-medium text-danger underline decoration-danger/40 underline-offset-2"
+              title={saveError ?? "Không lưu được nội dung"}
+              aria-label={`${saveError ?? "Không lưu được nội dung"}. Thử lại`}
+              onClick={() =>
+                void useNotesStore
+                  .getState()
+                  .flushPendingWrites()
+                  .catch(() => undefined)
+              }
+            >
+              Không lưu được · Thử lại
+            </button>
+          ) : (
+            <span
+              className={cn(
+                "ml-auto text-xs tabular-nums",
+                (saveStatus === "dirty" || saveStatus === "saving") && "text-muted",
+                saveStatus === "saved" && "text-success",
+              )}
+            >
+              {saveStatus === "dirty" && "Chưa lưu"}
+              {saveStatus === "saving" && "Đang lưu"}
+              {saveStatus === "saved" && "Đã lưu"}
+            </span>
+          )}
           <DropdownMenu
             trigger={
               <Button variant="ghost" size="icon" aria-label="Xuất">
@@ -413,7 +455,11 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               </div>
             </aside>
 
-            <div ref={stageRef} className="relative min-w-0 flex-1 overflow-auto">
+            <div
+              ref={stageRef}
+              data-notes-stage="true"
+              className="relative min-w-0 flex-1 overflow-auto"
+            >
               <Button
                 variant="ghost"
                 size="icon"
@@ -430,7 +476,11 @@ export function EditorView({ notebookId }: { notebookId: string }) {
               ) : (
                 <div className="mx-auto flex flex-col items-center gap-6 py-8">
                   {visiblePages.map((p) => (
-                    <div key={p.id} id={`page-${p.id}`} className="flex flex-col items-center gap-2">
+                    <div
+                      key={p.id}
+                      id={`page-${p.id}`}
+                      className="flex flex-col items-center gap-2"
+                    >
                       <PageSurface page={p} zoom={zoom} active={pages[pageIndex]?.id === p.id} />
                       <p className="text-xs tabular-nums text-muted">
                         {p.index + 1} / {pages.length}
@@ -676,11 +726,11 @@ function TextBtn() {
   const active = tool.name === "text";
   const fontSize = tool.fontSize;
   const [open, setOpen] = useState(false);
-  
+
   const setTool = (patch: Partial<import("@/lib/notes/store").ToolState>) => {
     const state = useNotesStore.getState();
     state.setTool({ name: "text", ...patch });
-    
+
     // Phát sự kiện để page-surface cập nhật TextObject đang chọn hoặc đang sửa
     window.dispatchEvent(new CustomEvent("notes-text-style-change", { detail: patch }));
   };
@@ -710,7 +760,7 @@ function TextBtn() {
             size="icon"
             className={cn(
               "w-5 rounded-l-none border-l border-transparent hover:border-border",
-              active && "tool-active border-border/20 hover:border-border/40"
+              active && "tool-active border-border/20 hover:border-border/40",
             )}
             aria-label="Tùy chọn chữ"
           >
@@ -718,148 +768,179 @@ function TextBtn() {
           </Button>
         }
       >
-      <div className="w-64">
-        {/* Font Selection */}
-        <div className="mb-4">
-          <p className="mb-1 text-xs font-semibold">Font chữ</p>
-          <select
-            className="w-full rounded-md border border-border bg-surface p-1.5 text-sm"
-            value={tool.fontFamily || "Be Vietnam Pro"}
-            onChange={(e) => setTool({ fontFamily: e.target.value })}
-          >
-            <option value="Be Vietnam Pro">Be Vietnam Pro</option>
-            <option value="Arial">Arial</option>
-            <option value="Times New Roman">Times New Roman</option>
-            <option value="Courier New">Courier New</option>
-          </select>
-        </div>
-
-        {/* Font Style Toggles */}
-        <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.fontWeight === "bold" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ fontWeight: tool.fontWeight === "bold" ? "normal" : "bold" })}
-          >
-            <Bold className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.fontStyle === "italic" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ fontStyle: tool.fontStyle === "italic" ? "normal" : "italic" })}
-          >
-            <Italic className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.textDecoration === "underline" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ textDecoration: tool.textDecoration === "underline" ? "none" : "underline" })}
-          >
-            <Underline className="size-4" />
-          </Button>
-        </div>
-
-        {/* Alignment Toggles */}
-        <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "left" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ textAlign: "left" })}
-          >
-            <AlignLeft className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "center" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ textAlign: "center" })}
-          >
-            <AlignCenter className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-8 flex-1 rounded-sm", tool.textAlign === "right" && "bg-surface shadow-sm")}
-            onClick={() => setTool({ textAlign: "right" })}
-          >
-            <AlignRight className="size-4" />
-          </Button>
-        </div>
-
-        {/* Font Size */}
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold">Cỡ chữ</p>
-          <span className="rounded-md bg-accent-soft px-2 py-1 text-sm font-semibold text-accent tabular-nums">
-            {Math.round(fontSize)} pt
-          </span>
-        </div>
-        <Slider
-          min={10}
-          max={72}
-          step={1}
-          value={fontSize}
-          className="mb-4"
-          onValueChange={(value) => setTool({ fontSize: value })}
-        />
-
-        {/* Text Color */}
-        <p className="mb-2 text-xs font-semibold">Màu chữ</p>
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {PEN_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={cn("size-6 rounded-full border-2", tool.color === c ? "border-fg" : "border-transparent")}
-              style={{ background: c }}
-              onClick={() => setTool({ color: c })}
-            />
-          ))}
-        </div>
-
-        {/* Text Background Color */}
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-xs font-semibold">Màu nền</p>
-          {tool.textBgColor && (
-            <button
-              type="button"
-              className="text-[10px] text-muted hover:text-fg"
-              onClick={() => setTool({ textBgColor: null })}
+        <div className="w-64">
+          {/* Font Selection */}
+          <div className="mb-4">
+            <p className="mb-1 text-xs font-semibold">Font chữ</p>
+            <select
+              className="w-full rounded-md border border-border bg-surface p-1.5 text-sm"
+              value={tool.fontFamily || "Be Vietnam Pro"}
+              onChange={(e) => setTool({ fontFamily: e.target.value })}
             >
-              Xóa nền
-            </button>
+              <option value="Be Vietnam Pro">Be Vietnam Pro</option>
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+          </div>
+
+          {/* Font Style Toggles */}
+          <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.fontWeight === "bold" && "bg-surface shadow-sm",
+              )}
+              onClick={() =>
+                setTool({ fontWeight: tool.fontWeight === "bold" ? "normal" : "bold" })
+              }
+            >
+              <Bold className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.fontStyle === "italic" && "bg-surface shadow-sm",
+              )}
+              onClick={() =>
+                setTool({ fontStyle: tool.fontStyle === "italic" ? "normal" : "italic" })
+              }
+            >
+              <Italic className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.textDecoration === "underline" && "bg-surface shadow-sm",
+              )}
+              onClick={() =>
+                setTool({
+                  textDecoration: tool.textDecoration === "underline" ? "none" : "underline",
+                })
+              }
+            >
+              <Underline className="size-4" />
+            </Button>
+          </div>
+
+          {/* Alignment Toggles */}
+          <div className="mb-4 flex gap-1 rounded-md bg-overlay p-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.textAlign === "left" && "bg-surface shadow-sm",
+              )}
+              onClick={() => setTool({ textAlign: "left" })}
+            >
+              <AlignLeft className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.textAlign === "center" && "bg-surface shadow-sm",
+              )}
+              onClick={() => setTool({ textAlign: "center" })}
+            >
+              <AlignCenter className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "h-8 flex-1 rounded-sm",
+                tool.textAlign === "right" && "bg-surface shadow-sm",
+              )}
+              onClick={() => setTool({ textAlign: "right" })}
+            >
+              <AlignRight className="size-4" />
+            </Button>
+          </div>
+
+          {/* Font Size */}
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold">Cỡ chữ</p>
+            <span className="rounded-md bg-accent-soft px-2 py-1 text-sm font-semibold text-accent tabular-nums">
+              {Math.round(fontSize)} pt
+            </span>
+          </div>
+          <Slider
+            min={10}
+            max={72}
+            step={1}
+            value={fontSize}
+            className="mb-4"
+            onValueChange={(value) => setTool({ fontSize: value })}
+          />
+
+          {/* Text Color */}
+          <p className="mb-2 text-xs font-semibold">Màu chữ</p>
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {PEN_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={cn(
+                  "size-6 rounded-full border-2",
+                  tool.color === c ? "border-fg" : "border-transparent",
+                )}
+                style={{ background: c }}
+                onClick={() => setTool({ color: c })}
+              />
+            ))}
+          </div>
+
+          {/* Text Background Color */}
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold">Màu nền</p>
+            {tool.textBgColor && (
+              <button
+                type="button"
+                className="text-[10px] text-muted hover:text-fg"
+                onClick={() => setTool({ textBgColor: null })}
+              >
+                Xóa nền
+              </button>
+            )}
+          </div>
+          <div className="mb-4 flex flex-wrap gap-1.5">
+            {HIGHLIGHTER_COLORS.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={cn(
+                  "size-6 rounded-full border-2",
+                  tool.textBgColor === c ? "border-fg" : "border-transparent",
+                )}
+                style={{ background: c }}
+                onClick={() => setTool({ textBgColor: c })}
+              />
+            ))}
+          </div>
+
+          {tool.textBgColor && (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-semibold">Độ trong suốt nền</p>
+              <Slider
+                min={0.1}
+                max={1}
+                step={0.1}
+                value={tool.textBgOpacity ?? 1}
+                onValueChange={(value) => setTool({ textBgOpacity: value })}
+              />
+            </div>
           )}
         </div>
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {HIGHLIGHTER_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={cn("size-6 rounded-full border-2", tool.textBgColor === c ? "border-fg" : "border-transparent")}
-              style={{ background: c }}
-              onClick={() => setTool({ textBgColor: c })}
-            />
-          ))}
-        </div>
-        
-        {tool.textBgColor && (
-          <div className="mb-4">
-            <p className="mb-2 text-xs font-semibold">Độ trong suốt nền</p>
-            <Slider
-              min={0.1}
-              max={1}
-              step={0.1}
-              value={tool.textBgOpacity ?? 1}
-              onValueChange={(value) => setTool({ textBgOpacity: value })}
-            />
-          </div>
-        )}
-
-      </div>
-    </Popover>
+      </Popover>
     </div>
   );
 }
@@ -892,7 +973,7 @@ function ImageBtn() {
             size="icon"
             className={cn(
               "w-5 rounded-l-none border-l border-transparent hover:border-border",
-              active && "tool-active border-border/20 hover:border-border/40"
+              active && "tool-active border-border/20 hover:border-border/40",
             )}
             aria-label="Tùy chọn ảnh"
           >
@@ -900,39 +981,39 @@ function ImageBtn() {
           </Button>
         }
       >
-      <div className="w-64">
-        <p className="mb-1 text-sm font-semibold">Thêm ảnh</p>
-        <p className="mb-3 text-xs leading-relaxed text-muted">
-          Ảnh được lưu ngay trong sổ và chọn sẵn để bạn di chuyển hoặc đổi kích thước.
-        </p>
-        <Button
-          className="w-full justify-start"
-          onClick={() => {
-            setOpen(false);
-            window.dispatchEvent(new Event(OPEN_IMAGE_PICKER_EVENT));
-          }}
-        >
-          <Upload /> Chọn ảnh từ máy
-        </Button>
-        <div className="mt-3 flex gap-2 rounded-lg bg-overlay p-2.5">
-          <ClipboardPaste className="mt-0.5 size-4 shrink-0 text-accent" />
-          <p className="text-xs leading-relaxed text-muted">
-            Ảnh chụp đang ở bảng tạm? Nhấn <strong className="text-fg">Ctrl+V</strong> để dán thẳng
-            vào trang.
+        <div className="w-64">
+          <p className="mb-1 text-sm font-semibold">Thêm ảnh</p>
+          <p className="mb-3 text-xs leading-relaxed text-muted">
+            Ảnh được lưu ngay trong sổ và chọn sẵn để bạn di chuyển hoặc đổi kích thước.
           </p>
+          <Button
+            className="w-full justify-start"
+            onClick={() => {
+              setOpen(false);
+              window.dispatchEvent(new Event(OPEN_IMAGE_PICKER_EVENT));
+            }}
+          >
+            <Upload /> Chọn ảnh từ máy
+          </Button>
+          <div className="mt-3 flex gap-2 rounded-lg bg-overlay p-2.5">
+            <ClipboardPaste className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p className="text-xs leading-relaxed text-muted">
+              Ảnh chụp đang ở bảng tạm? Nhấn <strong className="text-fg">Ctrl+V</strong> để dán
+              thẳng vào trang.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="mt-2 min-h-10 w-full rounded-md px-2 text-left text-xs text-muted hover:bg-overlay hover:text-fg"
+            onClick={() => {
+              useNotesStore.getState().setTool({ name: "image" });
+              setOpen(false);
+            }}
+          >
+            Hoặc bấm vào vị trí trên trang để chọn ảnh
+          </button>
         </div>
-        <button
-          type="button"
-          className="mt-2 min-h-10 w-full rounded-md px-2 text-left text-xs text-muted hover:bg-overlay hover:text-fg"
-          onClick={() => {
-            useNotesStore.getState().setTool({ name: "image" });
-            setOpen(false);
-          }}
-        >
-          Hoặc bấm vào vị trí trên trang để chọn ảnh
-        </button>
-      </div>
-    </Popover>
+      </Popover>
     </div>
   );
 }
@@ -968,7 +1049,7 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
             size="icon"
             className={cn(
               "w-5 rounded-l-none border-l border-transparent hover:border-border",
-              active && "tool-active border-border/20 hover:border-border/40"
+              active && "tool-active border-border/20 hover:border-border/40",
             )}
             aria-label={`Tùy chọn ${label}`}
           >
@@ -976,41 +1057,43 @@ function PenBtn({ id, label, icon: Icon }: { id: ToolName; label: string; icon: 
           </Button>
         }
       >
-      <p className="mb-2 text-xs font-medium">{label}</p>
-      <div className="mb-3 flex flex-wrap gap-1.5">
-        {colors.map((c) => (
-          <button
-            key={c}
-            type="button"
-            aria-label={c}
-            className={cn(
-              "size-7 rounded-full border-2",
-              color === c ? "border-fg" : "border-transparent",
-            )}
-            style={{ background: c }}
-            onClick={() =>
-              useNotesStore
-                .getState()
-                .setTool(
-                  id === "highlighter" ? { name: id, highlighterColor: c } : { name: id, color: c },
-                )
-            }
-          />
-        ))}
-      </div>
-      <p className="mb-1 text-[11px] text-muted">Độ dày</p>
-      <Slider
-        min={id === "highlighter" ? 8 : 0.8}
-        max={id === "highlighter" ? 36 : 12}
-        step={0.2}
-        value={width}
-        onValueChange={(v) =>
-          useNotesStore
-            .getState()
-            .setTool(id === "highlighter" ? { highlighterWidth: v } : { width: v })
-        }
-      />
-    </Popover>
+        <p className="mb-2 text-xs font-medium">{label}</p>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {colors.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={c}
+              className={cn(
+                "size-7 rounded-full border-2",
+                color === c ? "border-fg" : "border-transparent",
+              )}
+              style={{ background: c }}
+              onClick={() =>
+                useNotesStore
+                  .getState()
+                  .setTool(
+                    id === "highlighter"
+                      ? { name: id, highlighterColor: c }
+                      : { name: id, color: c },
+                  )
+              }
+            />
+          ))}
+        </div>
+        <p className="mb-1 text-[11px] text-muted">Độ dày</p>
+        <Slider
+          min={id === "highlighter" ? 8 : 0.8}
+          max={id === "highlighter" ? 36 : 12}
+          step={0.2}
+          value={width}
+          onValueChange={(v) =>
+            useNotesStore
+              .getState()
+              .setTool(id === "highlighter" ? { highlighterWidth: v } : { width: v })
+          }
+        />
+      </Popover>
     </div>
   );
 }
@@ -1125,8 +1208,13 @@ async function runSearch(notebookId: string, q: string) {
     return;
   }
   try {
-    const doc = await loadStoredPdfDocument(nb.pdfAssetId);
-    const hits = await searchPdfText(doc, q);
+    const documentLease = await acquireStoredPdfDocument(nb.pdfAssetId);
+    let hits: Awaited<ReturnType<typeof searchPdfText>>;
+    try {
+      hits = await searchPdfText(documentLease.document, q);
+    } finally {
+      documentLease.release();
+    }
     useNotesStore.setState({ pdfSearchHits: hits });
     if (!hits.length) toast.message("Không thấy kết quả.");
     else {

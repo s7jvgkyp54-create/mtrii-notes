@@ -14,6 +14,11 @@ import type {
 } from "./types";
 import * as desktop from "./desktop-db";
 import { normalizeSettings } from "./validation";
+import {
+  getObjectUrlRegistryStats,
+  invalidateAllObjectUrls,
+  invalidateObjectUrl,
+} from "./object-url-registry";
 
 interface NotesDB extends DBSchema {
   folders: { key: string; value: Folder };
@@ -25,12 +30,33 @@ interface NotesDB extends DBSchema {
   kv: { key: string; value: unknown };
   backups: { key: string; value: BackupRecord };
   documents: { key: string; value: StoredDocumentContent };
-  note_links: { key: string; value: NoteLink; indexes: { "by-source": string; "by-target": string } };
+  note_links: {
+    key: string;
+    value: NoteLink;
+    indexes: { "by-source": string; "by-target": string };
+  };
   note_versions: { key: string; value: NoteVersion; indexes: { "by-note": string } };
 }
 
 const DB_NAME = "notes-app";
 const DB_VERSION = 2;
+type TransientAssetInvalidation = string | null;
+const transientAssetInvalidationListeners = new Set<
+  (assetId: TransientAssetInvalidation) => void
+>();
+
+export function subscribeTransientAssetInvalidation(
+  listener: (assetId: TransientAssetInvalidation) => void,
+) {
+  transientAssetInvalidationListeners.add(listener);
+  return () => {
+    transientAssetInvalidationListeners.delete(listener);
+  };
+}
+
+function emitTransientAssetInvalidation(assetId: TransientAssetInvalidation) {
+  for (const listener of transientAssetInvalidationListeners) listener(assetId);
+}
 
 export interface LibraryDump {
   folders: Folder[];
@@ -63,11 +89,11 @@ export function getDb() {
         }
         if (oldVersion < 2) {
           db.createObjectStore("documents", { keyPath: "noteId" });
-          
+
           const noteLinks = db.createObjectStore("note_links", { keyPath: "id" });
           noteLinks.createIndex("by-source", "sourceNoteId");
           noteLinks.createIndex("by-target", "targetNoteId");
-          
+
           const noteVersions = db.createObjectStore("note_versions", { keyPath: "id" });
           noteVersions.createIndex("by-note", "noteId");
         }
@@ -90,7 +116,8 @@ export async function loadSettingsAndMeta(options?: { safeMode?: boolean }) {
     database.get("kv", "meta"),
   ]);
   const warnings: string[] = [];
-  if (settingsResult.status === "rejected") warnings.push("Không đọc được cài đặt; đã dùng mặc định.");
+  if (settingsResult.status === "rejected")
+    warnings.push("Không đọc được cài đặt; đã dùng mặc định.");
   if (metaResult.status === "rejected") warnings.push("Không đọc được metadata khởi động.");
   return {
     settings: normalizeSettings(
@@ -172,22 +199,22 @@ export async function putObjectsBatch(entries: { pageId: string; objects: Canvas
   if (desktop.isDesktopRuntime()) return desktop.putObjectsBatch(entries);
   const database = await getDb();
   const tx = database.transaction("pageObjects", "readwrite");
-  await Promise.all(
-    entries.map(({ pageId, objects }) => tx.store.put({ pageId, objects })),
-  );
+  await Promise.all(entries.map(({ pageId, objects }) => tx.store.put({ pageId, objects })));
   await tx.done;
 }
 export async function putAsset(asset: AssetRecord) {
-  if (desktop.isDesktopRuntime()) return desktop.putAsset(asset);
-  await (await getDb()).put("assets", asset);
+  if (desktop.isDesktopRuntime()) await desktop.putAsset(asset);
+  else await (await getDb()).put("assets", asset);
+  await invalidateTransientAsset(asset.id);
 }
 export async function getAsset(id: string) {
   if (desktop.isDesktopRuntime()) return desktop.getAsset(id);
   return (await getDb()).get("assets", id);
 }
 export async function delAsset(id: string) {
-  if (desktop.isDesktopRuntime()) return desktop.delAsset(id);
-  await (await getDb()).delete("assets", id);
+  if (desktop.isDesktopRuntime()) await desktop.delAsset(id);
+  else await (await getDb()).delete("assets", id);
+  await invalidateTransientAsset(id);
 }
 export async function putBookmark(b: Bookmark) {
   if (desktop.isDesktopRuntime()) return desktop.putBookmark(b);
@@ -289,7 +316,11 @@ export async function dumpAll(): Promise<LibraryDump> {
 }
 
 export async function replaceAll(data: LibraryDump) {
-  if (desktop.isDesktopRuntime()) return desktop.replaceAll(data);
+  if (desktop.isDesktopRuntime()) {
+    await desktop.replaceAll(data);
+    await invalidateAllTransientAssets();
+    return;
+  }
   const db = await getDb();
   const tx = db.transaction(
     ["folders", "notebooks", "pages", "pageObjects", "assets", "bookmarks", "kv"],
@@ -312,10 +343,15 @@ export async function replaceAll(data: LibraryDump) {
   if (data.settings) await tx.objectStore("kv").put(data.settings, "settings");
   if (data.meta) await tx.objectStore("kv").put(data.meta, "meta");
   await tx.done;
+  await invalidateAllTransientAssets();
 }
 
 export async function mergeDump(data: LibraryDump) {
-  if (desktop.isDesktopRuntime()) return desktop.mergeDump(data);
+  if (desktop.isDesktopRuntime()) {
+    await desktop.mergeDump(data);
+    await invalidateAllTransientAssets();
+    return;
+  }
   const db = await getDb();
   const tx = db.transaction(
     ["folders", "notebooks", "pages", "pageObjects", "assets", "bookmarks"],
@@ -328,6 +364,7 @@ export async function mergeDump(data: LibraryDump) {
   for (const a of data.assets) await tx.objectStore("assets").put(a);
   for (const b of data.bookmarks) await tx.objectStore("bookmarks").put(b);
   await tx.done;
+  await invalidateAllTransientAssets();
 }
 
 export async function storageEstimate() {
@@ -356,32 +393,35 @@ export async function flushStorage() {
   }
 }
 
-const urlCache = new Map<string, string>();
-const MAX_OBJECT_URLS = 48;
+export function getObjectUrlStats() {
+  const stats = getObjectUrlRegistryStats();
+  return { ...stats, live: stats.liveEntries };
+}
 
-export function objectUrlFor(id: string, blob: Blob) {
-  const existing = urlCache.get(id);
-  if (existing) {
-    urlCache.delete(id);
-    urlCache.set(id, existing);
-    return existing;
-  }
-  const url = URL.createObjectURL(blob);
-  urlCache.set(id, url);
-  while (urlCache.size > MAX_OBJECT_URLS) {
-    const oldest = urlCache.keys().next().value as string | undefined;
-    if (!oldest || oldest === id) break;
-    revokeObjectUrl(oldest);
-  }
-  return url;
+async function invalidateTransientAsset(id: string) {
+  invalidateObjectUrl(id);
+  const [{ invalidateAssetImage }, { evictPdf }] = await Promise.all([
+    import("./image-cache"),
+    import("./pdf"),
+  ]);
+  invalidateAssetImage(id);
+  evictPdf(id);
+  emitTransientAssetInvalidation(id);
 }
 
 export function revokeObjectUrl(id: string) {
-  const u = urlCache.get(id);
-  if (u) {
-    URL.revokeObjectURL(u);
-    urlCache.delete(id);
-  }
+  invalidateObjectUrl(id);
+}
+
+export async function invalidateAllTransientAssets() {
+  invalidateAllObjectUrls();
+  const [{ invalidateAllAssetImages }, { evictAllPdfs }] = await Promise.all([
+    import("./image-cache"),
+    import("./pdf"),
+  ]);
+  invalidateAllAssetImages();
+  evictAllPdfs();
+  emitTransientAssetInvalidation(null);
 }
 
 export async function getPomodoroSession() {
